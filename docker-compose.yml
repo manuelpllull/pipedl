@@ -1,0 +1,46 @@
+services:
+  syncify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syncify
+    restart: unless-stopped
+
+    environment:
+      # ── Spotify target ──────────────────────────────────────────────────
+      TARGET_USER_ID: mnupea          # Spotify user ID to sync
+
+      # ── Scheduling ──────────────────────────────────────────────────────
+      # Quartz cron: default = daily at midnight. Override as needed.
+      CRON_EXPRESSION: "0 0 0 * * ?"
+
+      # ── Paths (match volume mount points below) ──────────────────────────
+      DB_PATH: /data/syncify.db
+      MUSIC_OUTPUT_PATH: /music
+
+      # ── Run mode ─────────────────────────────────────────────────────────
+      # Set to "1" to scrape once and exit instead of running the scheduler.
+      # RUN_ONCE: "1"
+
+      # ── Navidrome (optional) ──────────────────────────────────────────────
+      # NAVIDROME_URL: http://navidrome:4533
+      # NAVIDROME_USER: admin
+      # NAVIDROME_PASSWORD: secret
+
+    volumes:
+      - syncify-data:/data      # SQLite database
+      - syncify-music:/music    # Downloaded music files
+
+    # Uncomment if you run Navidrome in the same Compose stack:
+    # networks:
+    #   - media
+
+# ─── Named volumes ────────────────────────────────────────────────────────────
+volumes:
+  syncify-data:
+  syncify-music:
+
+# ─── Optional shared network with Navidrome ──────────────────────────────────
+# networks:
+#   media:
+#     external: true
