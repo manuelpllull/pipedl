@@ -52,8 +52,8 @@ $HOME/.dotnet/dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj -c Release -
 # 3. Setup Python Virtual Environment for spotdl
 echo ">> Setting up Python virtual environment for spotdl..."
 sudo python3 -m venv /opt/spotdl-venv
-sudo /opt/spotdl-venv/bin/pip install --no-cache-dir spotdl
 sudo chown -R $USER:$USER /opt/spotdl-venv
+/opt/spotdl-venv/bin/pip install --no-cache-dir spotdl
 
 # 4. Setup Playwright locally
 echo ">> Downloading Playwright Chromium browser..."
