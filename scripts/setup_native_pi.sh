@@ -32,8 +32,14 @@ sudo apt-get install -y --no-install-recommends \
 
 # Install .NET 10 SDK
 echo ">> Installing .NET 10 SDK..."
-curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0
+# Create an installation directory on the large partition
+mkdir -p $HOME/.dotnet
 export DOTNET_ROOT=$HOME/.dotnet
+export DOTNET_INSTALL_DIR=$HOME/.dotnet
+# Force the installer to write temp files to the home directory instead of /tmp 
+export TMPDIR=$HOME/tmp
+mkdir -p $TMPDIR
+curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0 --install-dir $HOME/.dotnet
 export PATH=$PATH:$HOME/.dotnet
 
 # Install Node.js (needed for Playwright setup)
