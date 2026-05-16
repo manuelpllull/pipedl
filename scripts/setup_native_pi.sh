@@ -45,15 +45,13 @@ fi
 
 # 2. Build the Pipedl application natively
 echo ">> Building the .NET application..."
-cd /opt/pipedl
-sudo chown -R $USER:$USER /opt/pipedl
+cd ~/scripts/pipedl
 $HOME/.dotnet/dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj -c Release -o ./publish /p:UseAppHost=true
 
 # 3. Setup Python Virtual Environment for spotdl
 echo ">> Setting up Python virtual environment for spotdl..."
-sudo python3 -m venv /opt/spotdl-venv
-sudo chown -R $USER:$USER /opt/spotdl-venv
-/opt/spotdl-venv/bin/pip install --no-cache-dir spotdl
+python3 -m venv ~/scripts/spotdl-venv
+~/scripts/spotdl-venv/bin/pip install --no-cache-dir spotdl
 
 # 4. Setup Playwright locally
 echo ">> Downloading Playwright Chromium browser..."
@@ -62,30 +60,33 @@ npx --yes playwright@1.59.0 install --with-deps chromium
 
 # 5. Create the wrapper script
 echo ">> Creating Pipedl run script..."
-cat << 'EOF' > /opt/pipedl/run_pipedl.sh
+cat << 'EOF' > ~/scripts/pipedl/run_pipedl.sh
 #!/bin/bash
 # Paths configuration
-export DB_PATH=/opt/pipedl/data/pipedl.db
+export DB_PATH=$HOME/scripts/pipedl/data/pipedl.db
 export MUSIC_OUTPUT_PATH=/music
 export TARGET_USER_ID=mnupea
 export RUN_ONCE=1
 
 # Include spotdl and dotnet in path
-export PATH="/opt/spotdl-venv/bin:$HOME/.dotnet:$PATH"
+export PATH="$HOME/scripts/spotdl-venv/bin:$HOME/.dotnet:$PATH"
 export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
 
 # Run the app
-cd /opt/pipedl/publish
+cd $HOME/scripts/pipedl/publish
 ./Pipedl.Worker
 EOF
 
-chmod +x /opt/pipedl/run_pipedl.sh
+chmod +x ~/scripts/pipedl/run_pipedl.sh
 
 # 6. Ensure data directory exists
-mkdir -p /opt/pipedl/data
+mkdir -p ~/scripts/pipedl/data
 
 # 7. Setup Systemd Timer (cron equivalent)
 echo ">> Configuring systemd timer to daily at 1 AM..."
+SCRIPT_PATH="$HOME/scripts/pipedl/run_pipedl.sh"
+PUBLISH_PATH="$HOME/scripts/pipedl/publish"
+
 sudo bash -c 'cat << EOF > /etc/systemd/system/pipedl-native.service
 [Unit]
 Description=Pipedl Native Worker
@@ -94,8 +95,8 @@ After=network.target
 [Service]
 Type=oneshot
 User='"$USER"'
-ExecStart=/opt/pipedl/run_pipedl.sh
-WorkingDirectory=/opt/pipedl/publish
+ExecStart='"$SCRIPT_PATH"'
+WorkingDirectory='"$PUBLISH_PATH"'
 StandardOutput=journal
 StandardError=journal
 
@@ -121,4 +122,4 @@ sudo systemctl enable --now pipedl-native.timer
 echo "=== Installation Complete! ==="
 echo "Pipedl will now run natively every day at 1 AM."
 echo "You can trigger a manual run with:"
-echo "  /opt/pipedl/run_pipedl.sh"
+echo "  ~/scripts/pipedl/run_pipedl.sh"
