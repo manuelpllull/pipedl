@@ -1,4 +1,4 @@
-namespace Syncify.Domain.Entities;
+namespace Pipedl.Domain.Entities;
 
 public class Track
 {

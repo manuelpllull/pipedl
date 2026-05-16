@@ -5,14 +5,14 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore dependencies first (layer-cache friendly)
-COPY src/Syncify.Domain/Syncify.Domain.csproj          src/Syncify.Domain/
-COPY src/Syncify.Infrastructure/Syncify.Infrastructure.csproj src/Syncify.Infrastructure/
-COPY src/Syncify.Worker/Syncify.Worker.csproj           src/Syncify.Worker/
-RUN dotnet restore src/Syncify.Worker/Syncify.Worker.csproj
+COPY src/Pipedl.Domain/Pipedl.Domain.csproj          src/Pipedl.Domain/
+COPY src/Pipedl.Infrastructure/Pipedl.Infrastructure.csproj src/Pipedl.Infrastructure/
+COPY src/Pipedl.Worker/Pipedl.Worker.csproj           src/Pipedl.Worker/
+RUN dotnet restore src/Pipedl.Worker/Pipedl.Worker.csproj
 
 # Copy everything else and publish
 COPY . .
-RUN dotnet publish src/Syncify.Worker/Syncify.Worker.csproj \
+RUN dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj \
     -c Release -o /app/publish --no-restore
 
 # ─────────────────────────────────────────────
@@ -51,10 +51,10 @@ VOLUME ["/data"]
 # Music volume – spotdl downloads land here
 VOLUME ["/music"]
 
-ENV DB_PATH=/data/syncify.db
+ENV DB_PATH=/data/pipedl.db
 ENV TARGET_USER_ID=mnupea
 # Cron expression (default: every day at midnight)
 ENV CRON_EXPRESSION="0 0 0 * * ?"
 ENV MUSIC_OUTPUT_PATH=/music
 
-ENTRYPOINT ["dotnet", "Syncify.Worker.dll"]
+ENTRYPOINT ["dotnet", "Pipedl.Worker.dll"]

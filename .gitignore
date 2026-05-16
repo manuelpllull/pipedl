@@ -50,7 +50,8 @@ PublishProfiles/
 *.db
 *.db-shm
 *.db-wal
-syncify.db
+pipedl.db
+pipedl.db
 
 # Playwright browser cache (downloaded at runtime)
 .playwright/

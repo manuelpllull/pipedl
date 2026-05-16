@@ -1,4 +1,4 @@
-# Syncify
+# pipedl
 
 > A self-hosted, headless Spotify playlist syncer designed to run on a **Raspberry Pi** alongside [Navidrome](https://www.navidrome.org/).  
 > It scrapes your Spotify playlists via Playwright, diffs them against a local SQLite database, and downloads new tracks with [SpotDL](https://github.com/spotDL/spotify-downloader) — all on a cron schedule you control.
@@ -24,17 +24,17 @@
 ## 🏗️ Architecture
 
 ```
-Syncify/
+Pipedl/
 ├── src/
-│   ├── Syncify.Domain/           # Pure domain logic
+│   ├── Pipedl.Domain/           # Pure domain logic
 │   │   └── Entities/
 │   │       ├── Playlist.cs       # Entity + PlaylistHelpers (checksum, diff)
 │   │       └── Track.cs
 │   │
-│   ├── Syncify.Infrastructure/   # SQLite/Dapper, DB factory
+│   ├── Pipedl.Infrastructure/   # SQLite/Dapper, DB factory
 │   │   └── DbConnectionFactory.cs
 │   │
-│   └── Syncify.Worker/           # .NET Worker Service (the runnable host)
+│   └── Pipedl.Worker/           # .NET Worker Service (the runnable host)
 │       ├── Features/
 │       │   ├── SyncUserPlaylists/   # Slice: scrape user → update DB
 │       │   ├── SyncSinglePlaylist/  # Slice: diff a single playlist
@@ -46,7 +46,7 @@ Syncify/
 ├── Dockerfile                    # Multi-stage build (SDK → runtime + Chromium + spotdl)
 ├── docker-compose.yml            # Compose file with named volumes & env-var config
 ├── .specs/                       # Architecture & domain specifications
-└── Syncify.sln
+└── Pipedl.sln
 ```
 
 The project follows a **Vertical Slice** organization for the application layer, with a shared Clean Architecture core for Domain and Infrastructure.
@@ -78,14 +78,14 @@ cd syncify
 ### 2. Build
 
 ```bash
-~/.dotnet/dotnet build Syncify.sln -c Release
+~/.dotnet/dotnet build Pipedl.sln -c Release
 ```
 
 ### 3. Install Playwright browsers (once)
 
 ```bash
 # Inside the Worker output directory
-cd src/Syncify.Worker
+cd src/Pipedl.Worker
 npx playwright@1.59.0 install chromium
 ```
 
@@ -95,16 +95,16 @@ npx playwright@1.59.0 install chromium
 # Prints all playlists and their tracks for a given Spotify user ID
 env PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright \
   RUN_ONCE=1 \
-  ~/.dotnet/dotnet bin/Release/net10.0/Syncify.Worker.dll mnupea
+  ~/.dotnet/dotnet bin/Release/net10.0/Pipedl.Worker.dll mnupea
 ```
 
 ### 5. Run as a scheduled service
 
-Edit `src/Syncify.Worker/appsettings.json`:
+Edit `src/Pipedl.Worker/appsettings.json`:
 
 ```json
 {
-  "Syncify": {
+  "Pipedl": {
     "TargetUserId": "user",
     "CronExpression": "0 0 3 * * ?",
     "MaxConcurrentPlaylists": 2,
@@ -142,13 +142,13 @@ docker compose up -d
 ### One-shot scrape (print playlists + tracks, no downloads)
 
 ```bash
-docker compose run --rm -e RUN_ONCE=1 syncify
+docker compose run --rm -e RUN_ONCE=1 pipedl
 ```
 
 ### Tail logs
 
 ```bash
-docker compose logs -f syncify
+docker compose logs -f pipedl
 ```
 
 ### Configuration
@@ -159,7 +159,7 @@ All settings are passed as environment variables in `docker-compose.yml`:
 |---|---|---|
 | `TARGET_USER_ID` | `mnupea` | Spotify user ID to sync |
 | `CRON_EXPRESSION` | `0 0 0 * * ?` | Quartz cron (midnight daily) |
-| `DB_PATH` | `/data/syncify.db` | SQLite file path inside the container |
+| `DB_PATH` | `/data/pipedl.db` | SQLite file path inside the container |
 | `MUSIC_OUTPUT_PATH` | `/music` | SpotDL download root inside the container |
 | `RUN_ONCE` | *(unset)* | Set to `1` to scrape once and exit |
 | `NAVIDROME_URL` | *(unset)* | Optional: trigger library scan after download |
@@ -170,14 +170,14 @@ All settings are passed as environment variables in `docker-compose.yml`:
 
 | Volume | Mount | Purpose |
 |---|---|---|
-| `syncify-data` | `/data` | SQLite database — persists across restarts |
-| `syncify-music` | `/music` | Downloaded music files |
+| `pipedl-data` | `/data` | SQLite database — persists across restarts |
+| `pipedl-music` | `/music` | Downloaded music files |
 
 You can bind-mount host directories instead of named volumes if you prefer direct access to the files:
 
 ```yaml
 volumes:
-  - /srv/syncify/db:/data
+  - /srv/pipedl/db:/data
   - /srv/music:/music
 ```
 
@@ -190,7 +190,7 @@ services:
   navidrome:
     image: deluan/navidrome:latest
     volumes:
-      - syncify-music:/music:ro   # shared read-only
+  - pipedl-music:/music:ro   # shared read-only
     networks:
       - media
 
@@ -293,7 +293,7 @@ DownloadHandler
 ## 🧪 Running Tests
 
 ```bash
-~/.dotnet/dotnet test src/Syncify.Tests/Syncify.Tests.csproj --logger "console;verbosity=detailed"
+~/.dotnet/dotnet test src/Pipedl.Tests/Pipedl.Tests.csproj --logger "console;verbosity=detailed"
 ```
 
 Current test coverage:
@@ -321,27 +321,27 @@ Current test coverage:
 
 ```bash
 # Publish a self-contained ARM64 binary
-~/.dotnet/dotnet publish src/Syncify.Worker/Syncify.Worker.csproj \
+~/.dotnet/dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj \
   -c Release \
   -r linux-arm64 \
   --self-contained true \
   -o ./publish
 
 # Copy to Pi
-scp -r ./publish pi@raspberrypi:/opt/syncify
+scp -r ./publish pi@raspberrypi:/opt/pipedl
 
 # On the Pi — create a systemd service
-sudo nano /etc/systemd/system/syncify.service
+sudo nano /etc/systemd/system/pipedl.service
 ```
 
 ```ini
 [Unit]
-Description=Syncify Spotify Playlist Syncer
+Description=Pipedl Spotify Playlist Syncer
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/syncify
-ExecStart=/opt/syncify/Syncify.Worker
+WorkingDirectory=/opt/pipedl
+ExecStart=/opt/pipedl/Pipedl.Worker
 Restart=always
 RestartSec=10
 Environment=PLAYWRIGHT_BROWSERS_PATH=/home/pi/.cache/ms-playwright
@@ -352,9 +352,9 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl enable syncify
-sudo systemctl start syncify
-sudo journalctl -u syncify -f
+sudp systemctl enable pipedl
+sudo systemctl start pipedl
+sudo journalctl -u pipedl -f
 ```
 
 ---

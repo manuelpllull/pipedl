@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Quartz;
-using Syncify.Infrastructure;
-using Syncify.Worker;
+using Pipedl.Infrastructure;
+using Pipedl.Worker;
 
 async Task<int> MainAsync(string[] args)
 {
@@ -66,7 +66,7 @@ async Task<int> MainAsync(string[] args)
     IHost host = Host.CreateDefaultBuilder(args)
         .ConfigureServices((hostContext, services) =>
         {
-            var dbPath = Environment.GetEnvironmentVariable("DB_PATH") ?? "syncify.db";
+            var dbPath = Environment.GetEnvironmentVariable("DB_PATH") ?? "pipedl.db";
             services.AddSingleton(new DbConnectionFactory($"Data Source={dbPath};Version=3;Journal Mode=WAL;"));
             
             services.AddQuartz(q =>

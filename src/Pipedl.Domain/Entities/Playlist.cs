@@ -1,4 +1,4 @@
-namespace Syncify.Domain.Entities;
+namespace Pipedl.Domain.Entities;
 
 public class Playlist
 {
@@ -16,7 +16,8 @@ public static class PlaylistHelpers
     public static string ComputeChecksum(IEnumerable<string> trackIds)
     {
         if (trackIds == null) return string.Empty;
-        var ordered = trackIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).OrderBy(id => id);
+        var ordered = trackIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).OrderBy(id => id).ToList();
+        if (!ordered.Any()) return string.Empty;
         using var sha = System.Security.Cryptography.SHA1.Create();
         var joined = string.Join(',', ordered);
         var bytes = System.Text.Encoding.UTF8.GetBytes(joined);

@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Syncify.Domain\Syncify.Domain.csproj" />
+    <ProjectReference Include="..\Pipedl.Domain\Pipedl.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>

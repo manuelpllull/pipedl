@@ -1,7 +1,7 @@
 using System.Data;
 using System.Data.SQLite;
 
-namespace Syncify.Infrastructure;
+namespace Pipedl.Infrastructure;
 
 public class DbConnectionFactory
 {

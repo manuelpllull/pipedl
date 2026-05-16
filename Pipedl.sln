@@ -1,17 +1,16 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Syncify.Domain", "src\Syncify.Domain\Syncify.Domain.csproj", "{B7CD8C6A-5C08-4A97-882F-DBFCCE7A10D9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipedl.Domain", "src\Pipedl.Domain\Pipedl.Domain.csproj", "{B7CD8C6A-5C08-4A97-882F-DBFCCE7A10D9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Syncify.Infrastructure", "src\Syncify.Infrastructure\Syncify.Infrastructure.csproj", "{CF87BEE3-F0A8-40DA-BC2F-94A6B4BE6336}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipedl.Infrastructure", "src\Pipedl.Infrastructure\Pipedl.Infrastructure.csproj", "{CF87BEE3-F0A8-40DA-BC2F-94A6B4BE6336}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Syncify.Worker", "src\Syncify.Worker\Syncify.Worker.csproj", "{4A8F73A9-BF5E-4DB7-A589-A4ABC88CD727}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipedl.Worker", "src\Pipedl.Worker\Pipedl.Worker.csproj", "{4A8F73A9-BF5E-4DB7-A589-A4ABC88CD727}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Syncify.Tests", "src\Syncify.Tests\Syncify.Tests.csproj", "{42DCB604-F70D-432F-9A9B-A5D97682CA85}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipedl.Tests", "src\Pipedl.Tests\Pipedl.Tests.csproj", "{42DCB604-F70D-432F-9A9B-A5D97682CA85}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

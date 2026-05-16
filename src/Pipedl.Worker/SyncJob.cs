@@ -1,7 +1,7 @@
 using Quartz;
 using Microsoft.Extensions.Logging;
 
-namespace Syncify.Worker;
+namespace Pipedl.Worker;
 
 public class SyncJob : IJob
 {

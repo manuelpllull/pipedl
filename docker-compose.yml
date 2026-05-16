@@ -1,22 +1,22 @@
 services:
-  syncify:
+  pipedl:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: syncify
+    container_name: pipedl
     restart: unless-stopped
 
     environment:
       # ── Spotify target ──────────────────────────────────────────────────
-      TARGET_USER_ID: mnupea          # Spotify user ID to sync
+  TARGET_USER_ID: mnupea          # Spotify user ID to sync
 
       # ── Scheduling ──────────────────────────────────────────────────────
       # Quartz cron: default = daily at midnight. Override as needed.
       CRON_EXPRESSION: "0 0 0 * * ?"
 
       # ── Paths (match volume mount points below) ──────────────────────────
-      DB_PATH: /data/syncify.db
-      MUSIC_OUTPUT_PATH: /music
+  DB_PATH: /data/pipedl.db
+  MUSIC_OUTPUT_PATH: /music
 
       # ── Run mode ─────────────────────────────────────────────────────────
       # Set to "1" to scrape once and exit instead of running the scheduler.
@@ -28,8 +28,8 @@ services:
       # NAVIDROME_PASSWORD: secret
 
     volumes:
-      - syncify-data:/data      # SQLite database
-      - syncify-music:/music    # Downloaded music files
+  - pipedl-data:/data      # SQLite database
+  - pipedl-music:/music    # Downloaded music files
 
     # Uncomment if you run Navidrome in the same Compose stack:
     # networks:
@@ -37,8 +37,8 @@ services:
 
 # ─── Named volumes ────────────────────────────────────────────────────────────
 volumes:
-  syncify-data:
-  syncify-music:
+  pipedl-data:
+  pipedl-music:
 
 # ─── Optional shared network with Navidrome ──────────────────────────────────
 # networks:

@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
-namespace Syncify.Worker;
+namespace Pipedl.Worker;
 
 public record PlaylistInfo(string Url, string Name);
 public record TrackInfo(string Url, string PlaylistName);

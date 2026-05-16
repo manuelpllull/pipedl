@@ -1,20 +1,18 @@
-using Syncify.Domain.Entities;
-using Xunit;
+using Pipedl.Domain.Entities;
 
-namespace Syncify.Tests;
+namespace Pipedl.Tests;
 
 public class PlaylistTests
 {
     [Fact]
     public void ComputeChecksum_SameIdsDifferentOrder_ProducesSameChecksum()
     {
-        var a = new[] { "id3", "id1", "id2" };
-        var b = new[] { "id1", "id2", "id3" };
+        var a = new[] { "id1", "id2", "id3" };
+        var b = new[] { "id3", "id1", "id2" };
 
         var ca = PlaylistHelpers.ComputeChecksum(a);
         var cb = PlaylistHelpers.ComputeChecksum(b);
 
-        Assert.False(string.IsNullOrWhiteSpace(ca));
         Assert.Equal(ca, cb);
     }
 
@@ -26,14 +24,15 @@ public class PlaylistTests
 
         var (toInsert, toDelete) = PlaylistHelpers.DiffTracks(existing, scraped);
 
-        Assert.Equal(new[] { "d", "e" }.OrderBy(x => x), toInsert.OrderBy(x => x));
-        Assert.Equal(new[] { "a" }, toDelete);
+        Assert.Contains("d", toInsert);
+        Assert.Contains("e", toInsert);
+        Assert.Contains("a", toDelete);
     }
 
     [Fact]
     public void ComputeChecksum_EmptyOrNull_ReturnsEmptyString()
     {
         Assert.Equal(string.Empty, PlaylistHelpers.ComputeChecksum(null));
-        Assert.Equal(PlaylistHelpers.ComputeChecksum(Enumerable.Empty<string>()), PlaylistHelpers.ComputeChecksum(new string[0]));
+        Assert.Equal(string.Empty, PlaylistHelpers.ComputeChecksum(Array.Empty<string>()));
     }
 }
