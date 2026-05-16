@@ -8,6 +8,7 @@ echo ">> Installing .NET, Python, and Playwright dependencies..."
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
     curl \
+    wget \
     ca-certificates \
     gnupg \
     python3 \
@@ -30,17 +31,13 @@ sudo apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2
 
-# Install .NET 10 SDK
+# Install .NET 10 SDK (official Microsoft apt repo)
 echo ">> Installing .NET 10 SDK..."
-# Create an installation directory on the large partition
-mkdir -p $HOME/.dotnet
-export DOTNET_ROOT=$HOME/.dotnet
-export DOTNET_INSTALL_DIR=$HOME/.dotnet
-# Force the installer to write temp files to the home directory instead of /tmp 
-export TMPDIR=$HOME/tmp
-mkdir -p $TMPDIR
-curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0 --install-dir $HOME/.dotnet
-export PATH=$PATH:$HOME/.dotnet
+wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
+sudo dpkg -i /tmp/packages-microsoft-prod.deb
+rm -f /tmp/packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install -y dotnet-sdk-10.0
 
 # Install Node.js (needed for Playwright setup)
 if ! command -v node >/dev/null; then
@@ -52,7 +49,7 @@ fi
 # 2. Build the Pipedl application natively
 echo ">> Building the .NET application..."
 cd ~/scripts/pipedl
-$HOME/.dotnet/dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj -c Release -o ./publish /p:UseAppHost=true
+dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj -c Release -o ./publish /p:UseAppHost=true
 
 # 3. Setup Python Virtual Environment for spotdl
 echo ">> Setting up Python virtual environment for spotdl..."
