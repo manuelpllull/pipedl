@@ -71,7 +71,7 @@ The project follows a **Vertical Slice** organization for the application layer,
 ### 1. Clone
 
 ```bash
-git clone https://github.com/your-username/syncify.git
+git clone https://github.com/manuelpllull/syncify.git
 cd syncify
 ```
 
@@ -120,7 +120,7 @@ Then start the worker:
 
 ```bash
 env PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright \
-  ~/.dotnet/dotnet bin/Release/net10.0/Syncify.Worker.dll
+  ~/.dotnet/dotnet bin/Release/net10.0/Pipedl.Worker.dll
 ```
 
 ---
@@ -194,7 +194,7 @@ services:
     networks:
       - media
 
-  syncify:
+  pipedl:
     # ...
     environment:
       NAVIDROME_URL: http://navidrome:4533
@@ -247,7 +247,7 @@ CREATE TABLE SyncLogs (
 );
 ```
 
-SQLite is configured with **WAL (Write-Ahead Logging)** mode so Navidrome reads and Syncify writes never block each other.
+SQLite is configured with **WAL (Write-Ahead Logging)** mode so Navidrome reads and Pipedl writes never block each other.
 
 ---
 
