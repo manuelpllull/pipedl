@@ -1,0 +1,12 @@
+[Unit]
+Description=Pipedl one-shot runner (runs one sync and exits)
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pipedl
+ExecStart=/usr/bin/docker compose run --rm -e RUN_ONCE=1 pipedl
+User=root
+
+[Install]
+WantedBy=multi-user.target
