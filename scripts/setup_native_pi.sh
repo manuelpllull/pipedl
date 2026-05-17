@@ -65,6 +65,8 @@ npx --yes playwright@1.59.0 install --with-deps chromium
 echo ">> Creating Pipedl run script..."
 cat << 'EOF' > ~/scripts/pipedl/run_pipedl.sh
 #!/bin/bash
+set -e
+
 # Paths configuration
 export DB_PATH=$HOME/scripts/pipedl/data/pipedl.db
 export MUSIC_OUTPUT_PATH=/music
@@ -72,12 +74,29 @@ export TARGET_USER_ID=mnupea
 export RUN_ONCE=1
 
 # Include spotdl and dotnet in path
-export PATH="$HOME/scripts/spotdl-venv/bin:$HOME/.dotnet:$PATH"
+export PATH="$HOME/scripts/spotdl-venv/bin:$HOME/.dotnet:/usr/bin:$PATH"
 export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
 
-# Run the app
-cd $HOME/scripts/pipedl/publish
-./Pipedl.Worker
+# Resolve publish directory (supports explicit -o ./publish or default csproj publish path)
+if [ -d "$HOME/scripts/pipedl/publish" ]; then
+    PUBLISH_DIR="$HOME/scripts/pipedl/publish"
+elif [ -d "$HOME/scripts/pipedl/src/Pipedl.Worker/bin/Release/net10.0/publish" ]; then
+    PUBLISH_DIR="$HOME/scripts/pipedl/src/Pipedl.Worker/bin/Release/net10.0/publish"
+else
+    echo "ERROR: Publish directory not found. Run dotnet publish first."
+    exit 1
+fi
+
+cd "$PUBLISH_DIR"
+
+if [ -x "./Pipedl.Worker" ]; then
+    ./Pipedl.Worker
+elif [ -f "./Pipedl.Worker.dll" ]; then
+    dotnet ./Pipedl.Worker.dll
+else
+    echo "ERROR: Pipedl.Worker binary/dll not found in $PUBLISH_DIR"
+    exit 1
+fi
 EOF
 
 chmod +x ~/scripts/pipedl/run_pipedl.sh
@@ -88,7 +107,7 @@ mkdir -p ~/scripts/pipedl/data
 # 7. Setup Systemd Timer (cron equivalent)
 echo ">> Configuring systemd timer to daily at 1 AM..."
 SCRIPT_PATH="$HOME/scripts/pipedl/run_pipedl.sh"
-PUBLISH_PATH="$HOME/scripts/pipedl/publish"
+WORKDIR_PATH="$HOME/scripts/pipedl"
 
 sudo bash -c 'cat << EOF > /etc/systemd/system/pipedl-native.service
 [Unit]
@@ -99,7 +118,7 @@ After=network.target
 Type=oneshot
 User='"$USER"'
 ExecStart='"$SCRIPT_PATH"'
-WorkingDirectory='"$PUBLISH_PATH"'
+WorkingDirectory='"$WORKDIR_PATH"'
 StandardOutput=journal
 StandardError=journal
 
