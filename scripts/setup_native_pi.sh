@@ -3,6 +3,12 @@ set -e
 
 echo "=== Pipedl Native Installation for Raspberry Pi ==="
 
+# Cleanup stale Microsoft apt repository entries from prior attempts.
+# These can fail on newer Debian sqv policy checks and block apt update.
+sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+sudo rm -f /etc/apt/sources.list.d/microsoft*.list
+sudo sed -i '/packages\.microsoft\.com/d' /etc/apt/sources.list 2>/dev/null || true
+
 # 1. Install prerequisites
 echo ">> Installing .NET, Python, and Playwright dependencies..."
 sudo apt-get update
