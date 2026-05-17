@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Quartz;
 using Pipedl.Infrastructure;
 using Pipedl.Worker;
+using System.Diagnostics;
 
 async Task<int> MainAsync(string[] args)
 {
@@ -25,6 +26,9 @@ async Task<int> MainAsync(string[] args)
         }
 
         var scraper = new PlaylistScraper();
+    var outputDir = Environment.GetEnvironmentVariable("MUSIC_OUTPUT_PATH") ?? "music";
+    Directory.CreateDirectory(outputDir);
+    var downloadTracks = (Environment.GetEnvironmentVariable("DOWNLOAD_TRACKS") ?? "1") != "0";
 
         try
         {
@@ -43,6 +47,8 @@ async Task<int> MainAsync(string[] args)
             // ── Step 2: get tracks per playlist ──────────────────────────────
             Console.WriteLine("\n>>> Fetching tracks from each playlist...\n");
             var total = 0;
+            var downloaded = 0;
+            var failedDownloads = 0;
             foreach (var playlist in playlists)
             {
                 var tracks = (await scraper.GetTracksForPlaylistAsync(playlist)).ToList();
@@ -50,9 +56,21 @@ async Task<int> MainAsync(string[] args)
                 Console.WriteLine($"\n  🎵 '{playlist.Name}' — {tracks.Count} track(s):");
                 foreach (var t in tracks)
                     Console.WriteLine($"      {t.Url}");
+
+                if (downloadTracks && tracks.Count > 0)
+                {
+                    Console.WriteLine($"\n  ⬇️  Downloading tracks for '{playlist.Name}' to {outputDir}...");
+                    foreach (var track in tracks)
+                    {
+                        var ok = await DownloadTrackWithSpotdlAsync(track.Url, outputDir);
+                        if (ok) downloaded++; else failedDownloads++;
+                    }
+                }
             }
 
             Console.WriteLine($"\n>>> Done. {total} total track(s) across {playlists.Count} playlist(s).");
+            if (downloadTracks)
+                Console.WriteLine($">>> Downloads complete. Success={downloaded}, Failed={failedDownloads}, Output={outputDir}");
         }
         catch (Exception ex)
         {
@@ -89,3 +107,46 @@ async Task<int> MainAsync(string[] args)
 }
 
 return await MainAsync(args);
+
+static async Task<bool> DownloadTrackWithSpotdlAsync(string trackUrl, string outputDir)
+{
+    try
+    {
+        var psi = new ProcessStartInfo("spotdl")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        psi.ArgumentList.Add(trackUrl);
+        psi.ArgumentList.Add("--output");
+        psi.ArgumentList.Add(outputDir);
+
+        using var process = new Process { StartInfo = psi };
+        process.Start();
+
+        var stdOutTask = process.StandardOutput.ReadToEndAsync();
+        var stdErrTask = process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync();
+        var stdout = await stdOutTask;
+        var stderr = await stdErrTask;
+
+        if (process.ExitCode == 0)
+            return true;
+
+        Console.WriteLine($"[spotdl] Failed for {trackUrl} (exit {process.ExitCode})");
+        if (!string.IsNullOrWhiteSpace(stderr))
+            Console.WriteLine($"[spotdl] {stderr.Trim()}");
+        else if (!string.IsNullOrWhiteSpace(stdout))
+            Console.WriteLine($"[spotdl] {stdout.Trim()}");
+        return false;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[spotdl] Exception for {trackUrl}: {ex.Message}");
+        return false;
+    }
+}
