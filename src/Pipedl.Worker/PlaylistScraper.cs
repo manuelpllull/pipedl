@@ -15,6 +15,10 @@ public class PlaylistScraper
         string.Equals(Environment.GetEnvironmentVariable("PIPEDL_PI_MODE"), "1", StringComparison.OrdinalIgnoreCase);
     private static readonly string BrowserPreference =
         (Environment.GetEnvironmentVariable("PIPEDL_BROWSER") ?? (IsPiLike ? "firefox" : "chromium")).Trim().ToLowerInvariant();
+    private static readonly int NavTimeoutMs = GetEnvInt("PIPEDL_NAV_TIMEOUT_MS", IsPiLike ? 180_000 : 12_000);
+    private static readonly int SelectorTimeoutMs = GetEnvInt("PIPEDL_SELECTOR_TIMEOUT_MS", IsPiLike ? 180_000 : 12_000);
+    private static readonly int TotalWatchdogSec = GetEnvInt("PIPEDL_TOTAL_WATCHDOG_SEC", IsPiLike ? 240 : 45);
+    private static readonly int LaunchWatchdogSec = GetEnvInt("PIPEDL_LAUNCH_WATCHDOG_SEC", IsPiLike ? 90 : 30);
 
     // ─── Step 1: User → Playlist URLs ──────────────────────────────────────────
 
@@ -31,8 +35,13 @@ public class PlaylistScraper
                 Console.WriteLine("[Step 1] Starting Playwright...");
                 using var playwright = await Playwright.CreateAsync();
                 Console.WriteLine($"[Step 1] Launching {BrowserPreference}...");
-                await using var browser = await LaunchBrowserAsync(playwright, "Step 1");
+                await using var browser = await RunWithWatchdogAsync(
+                    () => LaunchBrowserAsync(playwright, "Step 1"),
+                    TimeSpan.FromSeconds(LaunchWatchdogSec),
+                    "[Step 1] Browser launch watchdog timeout"
+                );
                 Console.WriteLine($"[Step 1] {BrowserPreference} launched.");
+                Console.WriteLine($"[Step 1] Time budget: nav={NavTimeoutMs}ms selector={SelectorTimeoutMs}ms total={TotalWatchdogSec}s");
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -44,8 +53,8 @@ public class PlaylistScraper
                 var page = await context.NewPageAsync();
                 Console.WriteLine("[Step 1] Navigating to profile page...");
                 await RunWithWatchdogAsync(
-                    () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = IsPiLike ? 35_000 : 12_000 }),
-                    TimeSpan.FromSeconds(IsPiLike ? 45 : 15),
+                    () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = NavTimeoutMs }),
+                    TimeSpan.FromMilliseconds(NavTimeoutMs + 15_000),
                     "[Step 1] Navigation watchdog timeout"
                 );
 
@@ -66,7 +75,7 @@ public class PlaylistScraper
                 // Wait for at least one candidate link if available
                 try
                 {
-                    await page.WaitForSelectorAsync("a[href*='/playlist/']", new PageWaitForSelectorOptions { Timeout = 12_000 });
+                    await page.WaitForSelectorAsync("a[href*='/playlist/']", new PageWaitForSelectorOptions { Timeout = SelectorTimeoutMs });
                 }
                 catch
                 {
@@ -115,7 +124,7 @@ public class PlaylistScraper
                 }
 
                 return innerResults.DistinctBy(p => p.Url).ToList();
-            }, TimeSpan.FromSeconds(45), "[Step 1] Playwright total watchdog timeout");
+            }, TimeSpan.FromSeconds(TotalWatchdogSec), "[Step 1] Playwright total watchdog timeout");
 
             if (results.Count > 0)
                 return results;
@@ -143,7 +152,11 @@ public class PlaylistScraper
                 Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
                 using var playwright = await Playwright.CreateAsync();
                 Console.WriteLine($"[Step 2] Launching {BrowserPreference} for '{playlist.Name}'...");
-                await using var browser = await LaunchBrowserAsync(playwright, "Step 2");
+                await using var browser = await RunWithWatchdogAsync(
+                    () => LaunchBrowserAsync(playwright, "Step 2"),
+                    TimeSpan.FromSeconds(LaunchWatchdogSec),
+                    $"[Step 2] Browser launch watchdog timeout for '{playlist.Name}'"
+                );
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -154,8 +167,8 @@ public class PlaylistScraper
                 await TryApplySpotifyCookiesAsync(context);
                 var page = await context.NewPageAsync();
                 await RunWithWatchdogAsync(
-                    () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = IsPiLike ? 35_000 : 12_000 }),
-                    TimeSpan.FromSeconds(IsPiLike ? 45 : 15),
+                    () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = NavTimeoutMs }),
+                    TimeSpan.FromMilliseconds(NavTimeoutMs + 15_000),
                     $"[Step 2] Navigation watchdog timeout for '{playlist.Name}'"
                 );
 
@@ -190,7 +203,7 @@ public class PlaylistScraper
                     Console.WriteLine($"[Step 2] Playwright found {innerResults.Count} track(s) in '{playlist.Name}'.");
 
                 return innerResults.DistinctBy(t => t.Url).ToList();
-            }, TimeSpan.FromSeconds(45), $"[Step 2] Playwright total watchdog timeout for '{playlist.Name}'");
+            }, TimeSpan.FromSeconds(TotalWatchdogSec), $"[Step 2] Playwright total watchdog timeout for '{playlist.Name}'");
 
             if (results.Count > 0)
                 return results;
@@ -338,6 +351,12 @@ public class PlaylistScraper
             throw new TimeoutException(timeoutMessage);
 
         return await task;
+    }
+
+    private static int GetEnvInt(string name, int defaultValue)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return int.TryParse(raw, out var value) && value > 0 ? value : defaultValue;
     }
 
     private static async Task<IEnumerable<PlaylistInfo>> FallbackGetPlaylistsAsync(string profileUrl)
