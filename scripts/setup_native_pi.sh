@@ -88,6 +88,12 @@ export PIPEDL_BROWSER=firefox
 export PATH="$HOME/scripts/spotdl-venv/bin:$HOME/.dotnet:/usr/bin:$PATH"
 export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
 
+# Ensure selected Playwright browser is present (self-heal for missing cache dirs)
+if [ "$PIPEDL_BROWSER" = "firefox" ] && ! find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 2 -type f -path "*/firefox/firefox" | grep -q .; then
+    echo "[run_pipedl] Firefox browser binary not found. Installing Playwright Firefox..."
+    npx --yes playwright@1.59.0 install firefox
+fi
+
 # Resolve publish directory (supports explicit -o ./publish or default csproj publish path)
 if [ -d "$HOME/scripts/pipedl/publish" ]; then
     PUBLISH_DIR="$HOME/scripts/pipedl/publish"
