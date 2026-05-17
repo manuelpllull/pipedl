@@ -31,13 +31,16 @@ sudo apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2
 
-# Install .NET 10 SDK (official Microsoft apt repo)
+# Install .NET 10 SDK (direct official tarball; avoids apt sqv/SHA1 policy issues)
 echo ">> Installing .NET 10 SDK..."
-wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
-sudo dpkg -i /tmp/packages-microsoft-prod.deb
-rm -f /tmp/packages-microsoft-prod.deb
-sudo apt-get update
-sudo apt-get install -y dotnet-sdk-10.0
+DOTNET_VERSION="10.0.100"
+DOTNET_TARBALL_URL="https://builds.dotnet.microsoft.com/dotnet/Sdk/${DOTNET_VERSION}/dotnet-sdk-${DOTNET_VERSION}-linux-arm64.tar.gz"
+mkdir -p "$HOME/.dotnet"
+wget -O "$HOME/dotnet-sdk.tar.gz" "$DOTNET_TARBALL_URL"
+tar -xzf "$HOME/dotnet-sdk.tar.gz" -C "$HOME/.dotnet"
+rm -f "$HOME/dotnet-sdk.tar.gz"
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$PATH"
 
 # Install Node.js (needed for Playwright setup)
 if ! command -v node >/dev/null; then
