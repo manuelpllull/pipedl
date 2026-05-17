@@ -66,9 +66,9 @@ python3 -m venv ~/scripts/spotdl-venv
 ~/scripts/spotdl-venv/bin/pip install --no-cache-dir spotdl
 
 # 4. Setup Playwright locally
-echo ">> Downloading Playwright Chromium browser..."
+echo ">> Downloading Playwright Chromium + Firefox browsers..."
 export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
-npx --yes playwright@1.59.0 install --with-deps chromium
+npx --yes playwright@1.59.0 install --with-deps chromium firefox
 
 # 5. Create the wrapper script
 echo ">> Creating Pipedl run script..."
@@ -81,6 +81,8 @@ export DB_PATH=$HOME/scripts/pipedl/data/pipedl.db
 export MUSIC_OUTPUT_PATH=/music
 export TARGET_USER_ID=mnupea
 export RUN_ONCE=1
+export PIPEDL_PI_MODE=1
+export PIPEDL_BROWSER=firefox
 
 # Include spotdl and dotnet in path
 export PATH="$HOME/scripts/spotdl-venv/bin:$HOME/.dotnet:/usr/bin:$PATH"

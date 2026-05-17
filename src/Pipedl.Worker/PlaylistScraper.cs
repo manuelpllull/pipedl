@@ -13,6 +13,8 @@ public class PlaylistScraper
     private static readonly bool IsPiLike =
         RuntimeInformation.ProcessArchitecture is Architecture.Arm or Architecture.Arm64 ||
         string.Equals(Environment.GetEnvironmentVariable("PIPEDL_PI_MODE"), "1", StringComparison.OrdinalIgnoreCase);
+    private static readonly string BrowserPreference =
+        (Environment.GetEnvironmentVariable("PIPEDL_BROWSER") ?? (IsPiLike ? "firefox" : "chromium")).Trim().ToLowerInvariant();
 
     // ─── Step 1: User → Playlist URLs ──────────────────────────────────────────
 
@@ -28,9 +30,9 @@ public class PlaylistScraper
             {
                 Console.WriteLine("[Step 1] Starting Playwright...");
                 using var playwright = await Playwright.CreateAsync();
-                Console.WriteLine("[Step 1] Launching Chromium...");
-                await using var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions("Step 1"));
-                Console.WriteLine("[Step 1] Chromium launched.");
+                Console.WriteLine($"[Step 1] Launching {BrowserPreference}...");
+                await using var browser = await LaunchBrowserAsync(playwright, "Step 1");
+                Console.WriteLine($"[Step 1] {BrowserPreference} launched.");
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -38,11 +40,12 @@ public class PlaylistScraper
                     IgnoreHTTPSErrors = true,
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 });
+                await TryApplySpotifyCookiesAsync(context);
                 var page = await context.NewPageAsync();
                 Console.WriteLine("[Step 1] Navigating to profile page...");
                 await RunWithWatchdogAsync(
-                    () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
-                    TimeSpan.FromSeconds(15),
+                    () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = IsPiLike ? 35_000 : 12_000 }),
+                    TimeSpan.FromSeconds(IsPiLike ? 45 : 15),
                     "[Step 1] Navigation watchdog timeout"
                 );
 
@@ -80,6 +83,19 @@ public class PlaylistScraper
                     {
                         var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
                         innerResults.Add(new PlaylistInfo(fullUrl, string.IsNullOrWhiteSpace(name) ? fullUrl : name));
+                    }
+                }
+
+                // Fallback extraction from page HTML for cases where anchors are virtualized.
+                if (innerResults.Count == 0)
+                {
+                    var html = await page.ContentAsync();
+                    var idMatches = Regex.Matches(html, "spotify:playlist:(?<id>[A-Za-z0-9]+)", RegexOptions.Compiled);
+                    foreach (Match m in idMatches)
+                    {
+                        var id = m.Groups["id"].Value;
+                        if (!string.IsNullOrWhiteSpace(id))
+                            innerResults.Add(new PlaylistInfo($"{BaseUrl}/playlist/{id}", id));
                     }
                 }
 
@@ -126,8 +142,8 @@ public class PlaylistScraper
             {
                 Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
                 using var playwright = await Playwright.CreateAsync();
-                Console.WriteLine($"[Step 2] Launching Chromium for '{playlist.Name}'...");
-                await using var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions("Step 2"));
+                Console.WriteLine($"[Step 2] Launching {BrowserPreference} for '{playlist.Name}'...");
+                await using var browser = await LaunchBrowserAsync(playwright, "Step 2");
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -135,10 +151,11 @@ public class PlaylistScraper
                     IgnoreHTTPSErrors = true,
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 });
+                await TryApplySpotifyCookiesAsync(context);
                 var page = await context.NewPageAsync();
                 await RunWithWatchdogAsync(
-                    () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
-                    TimeSpan.FromSeconds(15),
+                    () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = IsPiLike ? 35_000 : 12_000 }),
+                    TimeSpan.FromSeconds(IsPiLike ? 45 : 15),
                     $"[Step 2] Navigation watchdog timeout for '{playlist.Name}'"
                 );
 
@@ -203,7 +220,23 @@ public class PlaylistScraper
         }
     }
 
-    private static BrowserTypeLaunchOptions CreateLaunchOptions(string stepLabel)
+    private static async Task<IBrowser> LaunchBrowserAsync(IPlaywright playwright, string stepLabel)
+    {
+        if (BrowserPreference == "firefox")
+        {
+            var options = new BrowserTypeLaunchOptions
+            {
+                Headless = true,
+                Timeout = IsPiLike ? 60_000 : 20_000
+            };
+
+            return await playwright.Firefox.LaunchAsync(options);
+        }
+
+        return await playwright.Chromium.LaunchAsync(CreateChromiumLaunchOptions(stepLabel));
+    }
+
+    private static BrowserTypeLaunchOptions CreateChromiumLaunchOptions(string stepLabel)
     {
         var args = new List<string>
         {
@@ -249,6 +282,42 @@ public class PlaylistScraper
         }
 
         return options;
+    }
+
+    private static async Task TryApplySpotifyCookiesAsync(IBrowserContext context)
+    {
+        var cookieHeader = Environment.GetEnvironmentVariable("SPOTIFY_COOKIE");
+        if (string.IsNullOrWhiteSpace(cookieHeader))
+            return;
+
+        var cookies = new List<Cookie>();
+        foreach (var part in cookieHeader.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var idx = part.IndexOf('=');
+            if (idx <= 0 || idx >= part.Length - 1)
+                continue;
+
+            var name = part[..idx].Trim();
+            var value = part[(idx + 1)..].Trim();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(value))
+                continue;
+
+            cookies.Add(new Cookie
+            {
+                Name = name,
+                Value = value,
+                Domain = ".spotify.com",
+                Path = "/",
+                Secure = true,
+                HttpOnly = false
+            });
+        }
+
+        if (cookies.Count > 0)
+        {
+            await context.AddCookiesAsync(cookies);
+            Console.WriteLine($"[Scraper] Applied {cookies.Count} Spotify cookie(s) from SPOTIFY_COOKIE.");
+        }
     }
 
     private static async Task RunWithWatchdogAsync(Func<Task> action, TimeSpan timeout, string timeoutMessage)
