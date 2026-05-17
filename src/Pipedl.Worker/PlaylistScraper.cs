@@ -145,6 +145,12 @@ public class PlaylistScraper
     {
         Console.WriteLine($"[Step 2] Scraping tracks from playlist '{playlist.Name}' ({playlist.Url})");
 
+        // Fast path first: for many playlists this is the most efficient approach.
+        Console.WriteLine($"[Step 2] Trying HTTP+regex first for '{playlist.Name}'...");
+        var fallbackTracks = (await FallbackGetTracksAsync(playlist)).ToList();
+        if (fallbackTracks.Count > 0)
+            return fallbackTracks;
+
         try
         {
             var results = await RunWithWatchdogAsync(async () =>
@@ -213,9 +219,8 @@ public class PlaylistScraper
             Console.WriteLine($"[Step 2] Playwright failed for playlist '{playlist.Name}': {ex.Message}");
         }
 
-        // HTTP fallback
-        Console.WriteLine($"[Step 2] Falling back to HTTP+regex for '{playlist.Name}'...");
-        return await FallbackGetTracksAsync(playlist);
+        // Fallback already attempted before Playwright.
+        return fallbackTracks;
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -237,16 +242,40 @@ public class PlaylistScraper
     {
         if (BrowserPreference == "firefox")
         {
+            try
+            {
+                var options = new BrowserTypeLaunchOptions
+                {
+                    Headless = true,
+                    Timeout = IsPiLike ? 60_000 : 20_000
+                };
+
+                return await playwright.Firefox.LaunchAsync(options);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{stepLabel}] Firefox launch failed: {ex.Message}");
+                Console.WriteLine($"[{stepLabel}] Falling back to Chromium.");
+                return await playwright.Chromium.LaunchAsync(CreateChromiumLaunchOptions(stepLabel));
+            }
+        }
+
+        try
+        {
+            return await playwright.Chromium.LaunchAsync(CreateChromiumLaunchOptions(stepLabel));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{stepLabel}] Chromium launch failed: {ex.Message}");
+            Console.WriteLine($"[{stepLabel}] Falling back to Firefox.");
+
             var options = new BrowserTypeLaunchOptions
             {
                 Headless = true,
                 Timeout = IsPiLike ? 60_000 : 20_000
             };
-
             return await playwright.Firefox.LaunchAsync(options);
         }
-
-        return await playwright.Chromium.LaunchAsync(CreateChromiumLaunchOptions(stepLabel));
     }
 
     private static BrowserTypeLaunchOptions CreateChromiumLaunchOptions(string stepLabel)
