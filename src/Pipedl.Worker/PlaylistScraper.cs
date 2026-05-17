@@ -28,13 +28,35 @@ public class PlaylistScraper
             });
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
-                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                Locale = "en-US"
             });
             var page = await context.NewPageAsync();
             await page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30_000 });
 
+            // Accept cookie banner if present (common on fresh headless sessions)
+            var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
+            if (await acceptCookies.CountAsync() > 0)
+            {
+                await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
+                await page.WaitForTimeoutAsync(800);
+            }
+
+            // Let client-side app hydrate before scanning anchors
+            await page.WaitForTimeoutAsync(2_500);
+
             // Infinite scroll: keep scrolling until no new items appear
             await ScrollToBottomAsync(page);
+
+            // Wait for at least one candidate link if available
+            try
+            {
+                await page.WaitForSelectorAsync("a[href*='/playlist/']", new PageWaitForSelectorOptions { Timeout = 12_000 });
+            }
+            catch
+            {
+                // we'll continue and log diagnostics below
+            }
 
             var elements = await page.QuerySelectorAllAsync("a[href*='/playlist/']");
             var results = new List<PlaylistInfo>();
@@ -53,6 +75,15 @@ public class PlaylistScraper
             {
                 Console.WriteLine($"[Step 1] Playwright found {results.Count} playlist(s).");
                 return results.DistinctBy(p => p.Url).ToList();
+            }
+
+            var title = await page.TitleAsync();
+            Console.WriteLine($"[Step 1] Playwright found 0 playlists. Final URL: {page.Url}");
+            Console.WriteLine($"[Step 1] Page title: {title}");
+            if (title.Contains("Login", StringComparison.OrdinalIgnoreCase) ||
+                page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("[Step 1] Spotify likely returned a login wall for this environment.");
             }
         }
         catch (Exception ex)
@@ -81,10 +112,20 @@ public class PlaylistScraper
             });
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
-                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                Locale = "en-US"
             });
             var page = await context.NewPageAsync();
             await page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30_000 });
+
+            var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
+            if (await acceptCookies.CountAsync() > 0)
+            {
+                await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
+                await page.WaitForTimeoutAsync(800);
+            }
+
+            await page.WaitForTimeoutAsync(2_000);
 
             await ScrollToBottomAsync(page);
 
