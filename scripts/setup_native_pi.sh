@@ -20,6 +20,8 @@ sudo apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    python3.11 \
+    python3.11-venv \
     ffmpeg \
     libnss3 \
     libnspr4 \
@@ -62,8 +64,14 @@ dotnet publish src/Pipedl.Worker/Pipedl.Worker.csproj -c Release -o ./publish /p
 
 # 3. Setup Python Virtual Environment for spotdl
 echo ">> Setting up Python virtual environment for spotdl..."
-python3 -m venv ~/scripts/spotdl-venv
-~/scripts/spotdl-venv/bin/pip install --no-cache-dir spotdl
+if ! command -v python3.11 >/dev/null; then
+    echo "ERROR: python3.11 not found. Raspberry Pi OS image may be too old/new; install python3.11 and re-run."
+    exit 1
+fi
+
+python3.11 -m venv ~/scripts/spotdl-venv
+~/scripts/spotdl-venv/bin/pip install --upgrade pip setuptools wheel
+~/scripts/spotdl-venv/bin/pip install --no-cache-dir "spotdl<5"
 
 # 4. Setup Playwright locally
 echo ">> Downloading Playwright Chromium + Firefox browsers..."
