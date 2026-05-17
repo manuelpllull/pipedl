@@ -20,19 +20,24 @@ public class PlaylistScraper
         // Try Playwright first (handles JS rendering + infinite scroll)
         try
         {
+            Console.WriteLine("[Step 1] Starting Playwright...");
             using var playwright = await Playwright.CreateAsync();
+            Console.WriteLine("[Step 1] Launching Chromium...");
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
+                Timeout = 15_000,
                 Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
             });
+            Console.WriteLine("[Step 1] Chromium launched.");
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 Locale = "en-US"
             });
             var page = await context.NewPageAsync();
-            await page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30_000 });
+            Console.WriteLine("[Step 1] Navigating to profile page...");
+            await page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
 
             // Accept cookie banner if present (common on fresh headless sessions)
             var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
@@ -104,10 +109,13 @@ public class PlaylistScraper
 
         try
         {
+            Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
             using var playwright = await Playwright.CreateAsync();
+            Console.WriteLine($"[Step 2] Launching Chromium for '{playlist.Name}'...");
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
+                Timeout = 15_000,
                 Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
             });
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
@@ -116,7 +124,7 @@ public class PlaylistScraper
                 Locale = "en-US"
             });
             var page = await context.NewPageAsync();
-            await page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 30_000 });
+            await page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
 
             var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
             if (await acceptCookies.CountAsync() > 0)
