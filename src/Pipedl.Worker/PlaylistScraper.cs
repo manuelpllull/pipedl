@@ -37,7 +37,11 @@ public class PlaylistScraper
             });
             var page = await context.NewPageAsync();
             Console.WriteLine("[Step 1] Navigating to profile page...");
-            await page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+            await RunWithWatchdogAsync(
+                () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
+                TimeSpan.FromSeconds(15),
+                "[Step 1] Navigation watchdog timeout"
+            );
 
             // Accept cookie banner if present (common on fresh headless sessions)
             var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
@@ -124,7 +128,11 @@ public class PlaylistScraper
                 Locale = "en-US"
             });
             var page = await context.NewPageAsync();
-            await page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+            await RunWithWatchdogAsync(
+                () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
+                TimeSpan.FromSeconds(15),
+                $"[Step 2] Navigation watchdog timeout for '{playlist.Name}'"
+            );
 
             var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
             if (await acceptCookies.CountAsync() > 0)
@@ -182,6 +190,16 @@ public class PlaylistScraper
             if (current == previous) break;
             previous = current;
         }
+    }
+
+    private static async Task RunWithWatchdogAsync(Func<Task> action, TimeSpan timeout, string timeoutMessage)
+    {
+        var task = action();
+        var completed = await Task.WhenAny(task, Task.Delay(timeout));
+        if (completed != task)
+            throw new TimeoutException(timeoutMessage);
+
+        await task;
     }
 
     private static async Task<IEnumerable<PlaylistInfo>> FallbackGetPlaylistsAsync(string profileUrl)
