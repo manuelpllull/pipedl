@@ -20,80 +20,88 @@ public class PlaylistScraper
         // Try Playwright first (handles JS rendering + infinite scroll)
         try
         {
-            Console.WriteLine("[Step 1] Starting Playwright...");
-            using var playwright = await Playwright.CreateAsync();
-            Console.WriteLine("[Step 1] Launching Chromium...");
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            var results = await RunWithWatchdogAsync(async () =>
             {
-                Headless = true,
-                Timeout = 15_000,
-                Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-            });
-            Console.WriteLine("[Step 1] Chromium launched.");
-            var context = await browser.NewContextAsync(new BrowserNewContextOptions
-            {
-                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                Locale = "en-US"
-            });
-            var page = await context.NewPageAsync();
-            Console.WriteLine("[Step 1] Navigating to profile page...");
-            await RunWithWatchdogAsync(
-                () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
-                TimeSpan.FromSeconds(15),
-                "[Step 1] Navigation watchdog timeout"
-            );
-
-            // Accept cookie banner if present (common on fresh headless sessions)
-            var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
-            if (await acceptCookies.CountAsync() > 0)
-            {
-                await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
-                await page.WaitForTimeoutAsync(800);
-            }
-
-            // Let client-side app hydrate before scanning anchors
-            await page.WaitForTimeoutAsync(2_500);
-
-            // Infinite scroll: keep scrolling until no new items appear
-            await ScrollToBottomAsync(page);
-
-            // Wait for at least one candidate link if available
-            try
-            {
-                await page.WaitForSelectorAsync("a[href*='/playlist/']", new PageWaitForSelectorOptions { Timeout = 12_000 });
-            }
-            catch
-            {
-                // we'll continue and log diagnostics below
-            }
-
-            var elements = await page.QuerySelectorAllAsync("a[href*='/playlist/']");
-            var results = new List<PlaylistInfo>();
-            foreach (var el in elements)
-            {
-                var href = await el.GetAttributeAsync("href");
-                var name = (await el.InnerTextAsync()).Trim();
-                if (!string.IsNullOrEmpty(href) && href.Contains("/playlist/"))
+                Console.WriteLine("[Step 1] Starting Playwright...");
+                using var playwright = await Playwright.CreateAsync();
+                Console.WriteLine("[Step 1] Launching Chromium...");
+                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
                 {
-                    var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
-                    results.Add(new PlaylistInfo(fullUrl, string.IsNullOrWhiteSpace(name) ? fullUrl : name));
+                    Headless = true,
+                    Timeout = 15_000,
+                    Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                });
+                Console.WriteLine("[Step 1] Chromium launched.");
+                var context = await browser.NewContextAsync(new BrowserNewContextOptions
+                {
+                    UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    Locale = "en-US"
+                });
+                var page = await context.NewPageAsync();
+                Console.WriteLine("[Step 1] Navigating to profile page...");
+                await RunWithWatchdogAsync(
+                    () => page.GotoAsync(profileUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
+                    TimeSpan.FromSeconds(15),
+                    "[Step 1] Navigation watchdog timeout"
+                );
+
+                // Accept cookie banner if present (common on fresh headless sessions)
+                var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
+                if (await acceptCookies.CountAsync() > 0)
+                {
+                    await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
+                    await page.WaitForTimeoutAsync(800);
                 }
-            }
+
+                // Let client-side app hydrate before scanning anchors
+                await page.WaitForTimeoutAsync(2_500);
+
+                // Infinite scroll: keep scrolling until no new items appear
+                await ScrollToBottomAsync(page);
+
+                // Wait for at least one candidate link if available
+                try
+                {
+                    await page.WaitForSelectorAsync("a[href*='/playlist/']", new PageWaitForSelectorOptions { Timeout = 12_000 });
+                }
+                catch
+                {
+                    // we'll continue and log diagnostics below
+                }
+
+                var elements = await page.QuerySelectorAllAsync("a[href*='/playlist/']");
+                var innerResults = new List<PlaylistInfo>();
+                foreach (var el in elements)
+                {
+                    var href = await el.GetAttributeAsync("href");
+                    var name = (await el.InnerTextAsync()).Trim();
+                    if (!string.IsNullOrEmpty(href) && href.Contains("/playlist/"))
+                    {
+                        var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
+                        innerResults.Add(new PlaylistInfo(fullUrl, string.IsNullOrWhiteSpace(name) ? fullUrl : name));
+                    }
+                }
+
+                if (innerResults.Count > 0)
+                {
+                    Console.WriteLine($"[Step 1] Playwright found {innerResults.Count} playlist(s).");
+                    return innerResults.DistinctBy(p => p.Url).ToList();
+                }
+
+                var title = await page.TitleAsync();
+                Console.WriteLine($"[Step 1] Playwright found 0 playlists. Final URL: {page.Url}");
+                Console.WriteLine($"[Step 1] Page title: {title}");
+                if (title.Contains("Login", StringComparison.OrdinalIgnoreCase) ||
+                    page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("[Step 1] Spotify likely returned a login wall for this environment.");
+                }
+
+                return innerResults.DistinctBy(p => p.Url).ToList();
+            }, TimeSpan.FromSeconds(45), "[Step 1] Playwright total watchdog timeout");
 
             if (results.Count > 0)
-            {
-                Console.WriteLine($"[Step 1] Playwright found {results.Count} playlist(s).");
-                return results.DistinctBy(p => p.Url).ToList();
-            }
-
-            var title = await page.TitleAsync();
-            Console.WriteLine($"[Step 1] Playwright found 0 playlists. Final URL: {page.Url}");
-            Console.WriteLine($"[Step 1] Page title: {title}");
-            if (title.Contains("Login", StringComparison.OrdinalIgnoreCase) ||
-                page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine("[Step 1] Spotify likely returned a login wall for this environment.");
-            }
+                return results;
         }
         catch (Exception ex)
         {
@@ -113,59 +121,64 @@ public class PlaylistScraper
 
         try
         {
-            Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
-            using var playwright = await Playwright.CreateAsync();
-            Console.WriteLine($"[Step 2] Launching Chromium for '{playlist.Name}'...");
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            var results = await RunWithWatchdogAsync(async () =>
             {
-                Headless = true,
-                Timeout = 15_000,
-                Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-            });
-            var context = await browser.NewContextAsync(new BrowserNewContextOptions
-            {
-                UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                Locale = "en-US"
-            });
-            var page = await context.NewPageAsync();
-            await RunWithWatchdogAsync(
-                () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
-                TimeSpan.FromSeconds(15),
-                $"[Step 2] Navigation watchdog timeout for '{playlist.Name}'"
-            );
-
-            var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
-            if (await acceptCookies.CountAsync() > 0)
-            {
-                await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
-                await page.WaitForTimeoutAsync(800);
-            }
-
-            await page.WaitForTimeoutAsync(2_000);
-
-            await ScrollToBottomAsync(page);
-
-            // Prefer data-testid=tracklist-row, fall back to any href containing /track/
-            var elements = await page.QuerySelectorAllAsync("[data-testid='tracklist-row'] a[href*='/track/']");
-            if (elements.Count == 0)
-                elements = await page.QuerySelectorAllAsync("a[href*='/track/']");
-
-            var results = new List<TrackInfo>();
-            foreach (var el in elements)
-            {
-                var href = await el.GetAttributeAsync("href");
-                if (!string.IsNullOrEmpty(href) && href.Contains("/track/"))
+                Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
+                using var playwright = await Playwright.CreateAsync();
+                Console.WriteLine($"[Step 2] Launching Chromium for '{playlist.Name}'...");
+                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
                 {
-                    var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
-                    results.Add(new TrackInfo(fullUrl, playlist.Name));
+                    Headless = true,
+                    Timeout = 15_000,
+                    Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                });
+                var context = await browser.NewContextAsync(new BrowserNewContextOptions
+                {
+                    UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    Locale = "en-US"
+                });
+                var page = await context.NewPageAsync();
+                await RunWithWatchdogAsync(
+                    () => page.GotoAsync(playlist.Url, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = 12_000 }),
+                    TimeSpan.FromSeconds(15),
+                    $"[Step 2] Navigation watchdog timeout for '{playlist.Name}'"
+                );
+
+                var acceptCookies = page.GetByRole(AriaRole.Button, new() { Name = "Accept cookies" });
+                if (await acceptCookies.CountAsync() > 0)
+                {
+                    await acceptCookies.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
+                    await page.WaitForTimeoutAsync(800);
                 }
-            }
+
+                await page.WaitForTimeoutAsync(2_000);
+
+                await ScrollToBottomAsync(page);
+
+                // Prefer data-testid=tracklist-row, fall back to any href containing /track/
+                var elements = await page.QuerySelectorAllAsync("[data-testid='tracklist-row'] a[href*='/track/']");
+                if (elements.Count == 0)
+                    elements = await page.QuerySelectorAllAsync("a[href*='/track/']");
+
+                var innerResults = new List<TrackInfo>();
+                foreach (var el in elements)
+                {
+                    var href = await el.GetAttributeAsync("href");
+                    if (!string.IsNullOrEmpty(href) && href.Contains("/track/"))
+                    {
+                        var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
+                        innerResults.Add(new TrackInfo(fullUrl, playlist.Name));
+                    }
+                }
+
+                if (innerResults.Count > 0)
+                    Console.WriteLine($"[Step 2] Playwright found {innerResults.Count} track(s) in '{playlist.Name}'.");
+
+                return innerResults.DistinctBy(t => t.Url).ToList();
+            }, TimeSpan.FromSeconds(45), $"[Step 2] Playwright total watchdog timeout for '{playlist.Name}'");
 
             if (results.Count > 0)
-            {
-                Console.WriteLine($"[Step 2] Playwright found {results.Count} track(s) in '{playlist.Name}'.");
-                return results.DistinctBy(t => t.Url).ToList();
-            }
+                return results;
         }
         catch (Exception ex)
         {
@@ -200,6 +213,16 @@ public class PlaylistScraper
             throw new TimeoutException(timeoutMessage);
 
         await task;
+    }
+
+    private static async Task<T> RunWithWatchdogAsync<T>(Func<Task<T>> action, TimeSpan timeout, string timeoutMessage)
+    {
+        var task = action();
+        var completed = await Task.WhenAny(task, Task.Delay(timeout));
+        if (completed != task)
+            throw new TimeoutException(timeoutMessage);
+
+        return await task;
     }
 
     private static async Task<IEnumerable<PlaylistInfo>> FallbackGetPlaylistsAsync(string profileUrl)
