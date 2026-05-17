@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using Microsoft.Playwright;
 
 namespace Pipedl.Worker;
@@ -9,6 +10,9 @@ public record TrackInfo(string Url, string PlaylistName);
 public class PlaylistScraper
 {
     private const string BaseUrl = "https://open.spotify.com";
+    private static readonly bool IsPiLike =
+        RuntimeInformation.ProcessArchitecture is Architecture.Arm or Architecture.Arm64 ||
+        string.Equals(Environment.GetEnvironmentVariable("PIPEDL_PI_MODE"), "1", StringComparison.OrdinalIgnoreCase);
 
     // ─── Step 1: User → Playlist URLs ──────────────────────────────────────────
 
@@ -25,17 +29,14 @@ public class PlaylistScraper
                 Console.WriteLine("[Step 1] Starting Playwright...");
                 using var playwright = await Playwright.CreateAsync();
                 Console.WriteLine("[Step 1] Launching Chromium...");
-                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Headless = true,
-                    Timeout = 15_000,
-                    Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-                });
+                await using var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions("Step 1"));
                 Console.WriteLine("[Step 1] Chromium launched.");
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    Locale = "en-US"
+                    Locale = "en-US",
+                    IgnoreHTTPSErrors = true,
+                    ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 });
                 var page = await context.NewPageAsync();
                 Console.WriteLine("[Step 1] Navigating to profile page...");
@@ -126,16 +127,13 @@ public class PlaylistScraper
                 Console.WriteLine($"[Step 2] Starting Playwright for '{playlist.Name}'...");
                 using var playwright = await Playwright.CreateAsync();
                 Console.WriteLine($"[Step 2] Launching Chromium for '{playlist.Name}'...");
-                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Headless = true,
-                    Timeout = 15_000,
-                    Args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-                });
+                await using var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions("Step 2"));
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    Locale = "en-US"
+                    Locale = "en-US",
+                    IgnoreHTTPSErrors = true,
+                    ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 });
                 var page = await context.NewPageAsync();
                 await RunWithWatchdogAsync(
@@ -203,6 +201,54 @@ public class PlaylistScraper
             if (current == previous) break;
             previous = current;
         }
+    }
+
+    private static BrowserTypeLaunchOptions CreateLaunchOptions(string stepLabel)
+    {
+        var args = new List<string>
+        {
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage"
+        };
+
+        if (IsPiLike)
+        {
+            Console.WriteLine($"[{stepLabel}] Pi mode enabled: applying ARM stability flags.");
+            args.AddRange(
+            [
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--no-zygote",
+                "--single-process",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-features=Translate,BackForwardCache"
+            ]);
+        }
+
+        var options = new BrowserTypeLaunchOptions
+        {
+            Headless = true,
+            Timeout = IsPiLike ? 45_000 : 15_000,
+            Args = args
+        };
+
+        if (IsPiLike)
+        {
+            foreach (var candidate in new[] { "/usr/bin/chromium-browser", "/usr/bin/chromium", "/snap/bin/chromium" })
+            {
+                if (File.Exists(candidate))
+                {
+                    options.ExecutablePath = candidate;
+                    Console.WriteLine($"[{stepLabel}] Using system Chromium: {candidate}");
+                    break;
+                }
+            }
+        }
+
+        return options;
     }
 
     private static async Task RunWithWatchdogAsync(Func<Task> action, TimeSpan timeout, string timeoutMessage)
