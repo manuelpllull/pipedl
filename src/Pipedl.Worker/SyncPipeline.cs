@@ -15,7 +15,12 @@ public class SyncPipeline
         _scraper = scraper;
     }
 
-    public async Task<SyncRunResult> RunAsync(string userId, string outputDir, bool downloadTracks, CancellationToken cancellationToken = default)
+    public async Task<SyncRunResult> RunAsync(
+        string userId,
+        string outputDir,
+        bool downloadTracks,
+        string? targetPlaylist = null,
+        CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(outputDir);
 
@@ -24,6 +29,13 @@ public class SyncPipeline
         EnsureSchema(connection);
 
         var playlists = (await _scraper.GetPlaylistsForUserAsync(userId)).ToList();
+
+        if (!string.IsNullOrWhiteSpace(targetPlaylist))
+        {
+            playlists = FilterPlaylists(playlists, targetPlaylist).ToList();
+            Console.WriteLine($">>> TARGET_PLAYLIST set. Filtered to {playlists.Count} playlist(s) matching '{targetPlaylist}'.");
+        }
+
         Console.WriteLine($"\n>>> Found {playlists.Count} playlist(s) for user '{userId}'.");
 
         var playlistUrls = new HashSet<string>(playlists.Select(p => p.Url), StringComparer.OrdinalIgnoreCase);
@@ -109,6 +121,21 @@ public class SyncPipeline
     {
         var m = System.Text.RegularExpressions.Regex.Match(url ?? string.Empty, @"/track/(?<id>[A-Za-z0-9]+)");
         return m.Success ? m.Groups["id"].Value : null;
+    }
+
+    private static IEnumerable<PlaylistInfo> FilterPlaylists(IEnumerable<PlaylistInfo> playlists, string targetPlaylist)
+    {
+        var trimmed = targetPlaylist.Trim();
+        var targetId = ExtractPlaylistId(trimmed) ?? trimmed;
+
+        return playlists.Where(p =>
+        {
+            var id = ExtractPlaylistId(p.Url);
+            if (!string.IsNullOrWhiteSpace(id) && string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return string.Equals(p.Url, trimmed, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static void EnsureSchema(IDbConnection connection)

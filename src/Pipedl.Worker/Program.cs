@@ -7,7 +7,7 @@ using Pipedl.Worker;
 async Task<int> MainAsync(string[] args)
 {
     var dbPath = Environment.GetEnvironmentVariable("DB_PATH") ?? "pipedl.db";
-    var dbFactory = new DbConnectionFactory($"Data Source={dbPath};Version=3;Journal Mode=WAL;");
+    var dbFactory = new DbConnectionFactory($"Data Source={dbPath};");
 
     // If RUN_ONCE environment variable is set, run a full two-step scrape: user → playlists → tracks
     var runOnce = Environment.GetEnvironmentVariable("RUN_ONCE");
@@ -31,10 +31,11 @@ async Task<int> MainAsync(string[] args)
         var pipeline = new SyncPipeline(dbFactory, scraper);
         var outputDir = Environment.GetEnvironmentVariable("MUSIC_OUTPUT_PATH") ?? "music";
         var downloadTracks = (Environment.GetEnvironmentVariable("DOWNLOAD_TRACKS") ?? "1") != "0";
+        var targetPlaylist = Environment.GetEnvironmentVariable("TARGET_PLAYLIST");
 
         try
         {
-            var result = await pipeline.RunAsync(userId, outputDir, downloadTracks);
+            var result = await pipeline.RunAsync(userId, outputDir, downloadTracks, targetPlaylist);
 
             Console.WriteLine($"\n>>> Done. {result.ScrapedTracks} total scraped track(s) across {result.Playlists} playlist(s).");
             Console.WriteLine($">>> Pending before download: {result.PendingBeforeDownload}");
