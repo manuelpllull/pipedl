@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.72" />
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.10" />
   </ItemGroup>
 
   <PropertyGroup>

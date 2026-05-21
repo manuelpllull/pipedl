@@ -1,5 +1,5 @@
 using System.Data;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 
 namespace Pipedl.Infrastructure;
 
@@ -14,6 +14,6 @@ public class DbConnectionFactory
 
     public IDbConnection CreateConnection()
     {
-        return new SQLiteConnection(_connectionString);
+        return new SqliteConnection(_connectionString);
     }
 }
