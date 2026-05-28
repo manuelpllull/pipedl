@@ -31,14 +31,25 @@ services:
       - pipedl-data:/data      # SQLite database
       - pipedl-music:/music    # Downloaded music files
 
-    # Uncomment if you run Navidrome in the same Compose stack:
-    # networks:
-    #   - media
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: 1h
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+    volumes:
+      - navidrome-data:/data
+      - pipedl-music:/music:ro   # Read-only access to the downloaded music
+    restart: unless-stopped
 
 # ─── Named volumes ────────────────────────────────────────────────────────────
 volumes:
   pipedl-data:
   pipedl-music:
+  navidrome-data:
 
 # ─── Optional shared network with Navidrome ──────────────────────────────────
 # networks:

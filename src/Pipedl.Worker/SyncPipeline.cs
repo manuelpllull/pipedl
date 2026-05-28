@@ -1,5 +1,7 @@
 using System.Data;
 using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Pipedl.Infrastructure;
 
 namespace Pipedl.Worker;
@@ -19,7 +21,7 @@ public class SyncPipeline
         string userId,
         string outputDir,
         bool downloadTracks,
-        string? targetPlaylist = null,
+        int? targetPlaylistCount = null,
         CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(outputDir);
@@ -30,10 +32,10 @@ public class SyncPipeline
 
         var playlists = (await _scraper.GetPlaylistsForUserAsync(userId)).ToList();
 
-        if (!string.IsNullOrWhiteSpace(targetPlaylist))
+        if (targetPlaylistCount.HasValue && targetPlaylistCount.Value > 0)
         {
-            playlists = FilterPlaylists(playlists, targetPlaylist).ToList();
-            Console.WriteLine($">>> TARGET_PLAYLIST set. Filtered to {playlists.Count} playlist(s) matching '{targetPlaylist}'.");
+            playlists = playlists.Take(targetPlaylistCount.Value).ToList();
+            Console.WriteLine($">>> TARGET_PLAYLIST_COUNT set. Taking first {playlists.Count} playlist(s).");
         }
 
         Console.WriteLine($"\n>>> Found {playlists.Count} playlist(s) for user '{userId}'.");
@@ -81,20 +83,38 @@ public class SyncPipeline
         }
         else
         {
+            var spotdlExecutable = ResolveSpotdlExecutablePath();
+
             foreach (var trackId in pendingTrackIds)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var trackUrl = $"https://open.spotify.com/track/{trackId}";
-                var ok = await DownloadTrackWithSpotdlAsync(trackUrl, outputDir);
-                if (ok)
+                var downloadResult = await DownloadTrackWithSpotdlAsync(spotdlExecutable, trackUrl, outputDir);
+                if (downloadResult.Success)
                 {
-                    MarkTrackDownloaded(connection, trackId);
+                    MarkTrackDownloaded(connection, trackId, downloadResult.Metadata);
                     downloaded++;
                 }
                 else
                 {
                     failed++;
+                }
+            }
+
+            var staleMetadataTrackIds = GetDownloadedTrackIdsMissingMetadata(connection);
+            if (staleMetadataTrackIds.Count > 0)
+            {
+                Console.WriteLine($">>> Backfilling metadata for {staleMetadataTrackIds.Count} downloaded track(s) missing title/artist/album/duration...");
+
+                foreach (var trackId in staleMetadataTrackIds)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var trackUrl = $"https://open.spotify.com/track/{trackId}";
+                    var metadata = await GetTrackMetadataFromSpotdlAsync(spotdlExecutable, trackUrl);
+                    if (metadata is not null)
+                        UpdateTrackMetadata(connection, trackId, metadata);
                 }
             }
         }
@@ -121,21 +141,6 @@ public class SyncPipeline
     {
         var m = System.Text.RegularExpressions.Regex.Match(url ?? string.Empty, @"/track/(?<id>[A-Za-z0-9]+)");
         return m.Success ? m.Groups["id"].Value : null;
-    }
-
-    private static IEnumerable<PlaylistInfo> FilterPlaylists(IEnumerable<PlaylistInfo> playlists, string targetPlaylist)
-    {
-        var trimmed = targetPlaylist.Trim();
-        var targetId = ExtractPlaylistId(trimmed) ?? trimmed;
-
-        return playlists.Where(p =>
-        {
-            var id = ExtractPlaylistId(p.Url);
-            if (!string.IsNullOrWhiteSpace(id) && string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return string.Equals(p.Url, trimmed, StringComparison.OrdinalIgnoreCase);
-        });
     }
 
     private static void EnsureSchema(IDbConnection connection)
@@ -331,21 +336,80 @@ ORDER BY t.spotify_id;
         return ids;
     }
 
-    private static void MarkTrackDownloaded(IDbConnection connection, string trackId)
+    private static void MarkTrackDownloaded(IDbConnection connection, string trackId, SpotdlTrackMetadata? metadata)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
 UPDATE tracks
 SET downloaded = 1,
+    title = CASE WHEN @title IS NOT NULL AND @title <> '' THEN @title ELSE title END,
+    artist = CASE WHEN @artist IS NOT NULL AND @artist <> '' THEN @artist ELSE artist END,
+    album = CASE WHEN @album IS NOT NULL AND @album <> '' THEN @album ELSE album END,
+    duration = CASE WHEN @duration > 0 THEN @duration ELSE duration END,
     downloaded_at = @downloadedAt,
     last_seen_at = @seenAt
 WHERE spotify_id = @id;
 ";
 
+        AddParam(cmd, "@title", metadata?.Title);
+        AddParam(cmd, "@artist", metadata?.Artist);
+        AddParam(cmd, "@album", metadata?.Album);
+        AddParam(cmd, "@duration", metadata?.DurationSeconds ?? 0);
         AddParam(cmd, "@downloadedAt", DateTime.UtcNow.ToString("O"));
         AddParam(cmd, "@seenAt", DateTime.UtcNow.ToString("O"));
         AddParam(cmd, "@id", trackId);
         cmd.ExecuteNonQuery();
+    }
+
+    private static void UpdateTrackMetadata(IDbConnection connection, string trackId, SpotdlTrackMetadata metadata)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+UPDATE tracks
+SET title = CASE WHEN @title IS NOT NULL AND @title <> '' THEN @title ELSE title END,
+    artist = CASE WHEN @artist IS NOT NULL AND @artist <> '' THEN @artist ELSE artist END,
+    album = CASE WHEN @album IS NOT NULL AND @album <> '' THEN @album ELSE album END,
+    duration = CASE WHEN @duration > 0 THEN @duration ELSE duration END,
+    last_seen_at = @seenAt
+WHERE spotify_id = @id;
+";
+
+        AddParam(cmd, "@title", metadata.Title);
+        AddParam(cmd, "@artist", metadata.Artist);
+        AddParam(cmd, "@album", metadata.Album);
+        AddParam(cmd, "@duration", metadata.DurationSeconds);
+        AddParam(cmd, "@seenAt", DateTime.UtcNow.ToString("O"));
+        AddParam(cmd, "@id", trackId);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static List<string> GetDownloadedTrackIdsMissingMetadata(IDbConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+SELECT DISTINCT t.spotify_id
+FROM tracks t
+JOIN playlist_tracks pt ON pt.track_id = t.spotify_id
+JOIN playlists p ON p.spotify_id = pt.playlist_id
+WHERE p.is_active = 1
+  AND IFNULL(t.downloaded, 0) = 1
+  AND (
+    t.title = t.spotify_id
+    OR IFNULL(t.artist, '') = ''
+    OR IFNULL(t.album, '') = ''
+    OR IFNULL(t.duration, 0) = 0
+  )
+ORDER BY t.spotify_id;
+";
+
+        var ids = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids;
     }
 
     private static IDbDataParameter AddParam(IDbCommand command, string name, object? value)
@@ -357,11 +421,11 @@ WHERE spotify_id = @id;
         return p;
     }
 
-    private static async Task<bool> DownloadTrackWithSpotdlAsync(string trackUrl, string outputDir)
+    private static async Task<SpotdlDownloadResult> DownloadTrackWithSpotdlAsync(string spotdlExecutable, string trackUrl, string outputDir)
     {
         try
         {
-            var psi = new ProcessStartInfo("spotdl")
+            var psi = new ProcessStartInfo(spotdlExecutable)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -369,6 +433,7 @@ WHERE spotify_id = @id;
                 CreateNoWindow = true
             };
 
+            psi.ArgumentList.Add("download");
             psi.ArgumentList.Add(trackUrl);
             psi.ArgumentList.Add("--output");
             psi.ArgumentList.Add(outputDir);
@@ -384,21 +449,135 @@ WHERE spotify_id = @id;
             var stderr = await stdErrTask;
 
             if (process.ExitCode == 0)
-                return true;
+            {
+                var metadata = await GetTrackMetadataFromSpotdlAsync(spotdlExecutable, trackUrl);
+                return new SpotdlDownloadResult(true, metadata);
+            }
 
             Console.WriteLine($"[spotdl] Failed for {trackUrl} (exit {process.ExitCode})");
             if (!string.IsNullOrWhiteSpace(stderr))
                 Console.WriteLine($"[spotdl] {stderr.Trim()}");
             else if (!string.IsNullOrWhiteSpace(stdout))
                 Console.WriteLine($"[spotdl] {stdout.Trim()}");
-            return false;
+            return SpotdlDownloadResult.Failed;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[spotdl] Exception for {trackUrl}: {ex.Message}");
-            return false;
+            return SpotdlDownloadResult.Failed;
         }
     }
+
+    private static async Task<SpotdlTrackMetadata?> GetTrackMetadataFromSpotdlAsync(string spotdlExecutable, string trackUrl)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(spotdlExecutable)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            psi.ArgumentList.Add("save");
+            psi.ArgumentList.Add(trackUrl);
+            psi.ArgumentList.Add("--save-file");
+            psi.ArgumentList.Add("-");
+
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+
+            var stdout = await process.StandardOutput.ReadToEndAsync();
+            var stderr = await process.StandardError.ReadToEndAsync();
+
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(stderr))
+                    Console.WriteLine($"[spotdl] Metadata lookup failed for {trackUrl}: {stderr.Trim()}");
+                return null;
+            }
+
+            var json = ExtractFirstJsonArray(stdout);
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            var songs = JsonSerializer.Deserialize<List<SpotdlSaveSong>>(
+                json,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            var first = songs?.FirstOrDefault();
+            if (first is null)
+                return null;
+
+            var artist = !string.IsNullOrWhiteSpace(first.Artist)
+                ? first.Artist
+                : string.Join(", ", first.Artists?.Where(a => !string.IsNullOrWhiteSpace(a)) ?? []);
+
+            return new SpotdlTrackMetadata(
+                first.Name ?? string.Empty,
+                artist,
+                first.AlbumName ?? string.Empty,
+                first.Duration ?? 0);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[spotdl] Metadata parse exception for {trackUrl}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string ResolveSpotdlExecutablePath()
+    {
+        var overridePath = Environment.GetEnvironmentVariable("SPOTDL_PATH");
+        if (!string.IsNullOrWhiteSpace(overridePath))
+            return overridePath;
+
+        var cursor = new DirectoryInfo(Environment.CurrentDirectory);
+        while (cursor is not null)
+        {
+            var localVenvPath = Path.Combine(cursor.FullName, ".venv-spotdl", "bin", "spotdl");
+            if (File.Exists(localVenvPath))
+                return localVenvPath;
+
+            cursor = cursor.Parent;
+        }
+
+        return "spotdl";
+    }
+
+    private static string? ExtractFirstJsonArray(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var start = text.IndexOf('[');
+        var end = text.LastIndexOf(']');
+        if (start < 0 || end <= start)
+            return null;
+
+        return text[start..(end + 1)];
+    }
+}
+
+sealed record SpotdlDownloadResult(bool Success, SpotdlTrackMetadata? Metadata)
+{
+    public static SpotdlDownloadResult Failed { get; } = new(false, null);
+}
+
+sealed record SpotdlTrackMetadata(string Title, string Artist, string Album, int DurationSeconds);
+
+sealed class SpotdlSaveSong
+{
+    public string? Name { get; init; }
+    public string? Artist { get; init; }
+    public List<string>? Artists { get; init; }
+    [JsonPropertyName("album_name")]
+    public string? AlbumName { get; init; }
+    public int? Duration { get; init; }
 }
 
 public class SyncRunResult

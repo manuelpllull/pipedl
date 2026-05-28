@@ -19,15 +19,17 @@ public class SyncJob : IJob
         var userId = Environment.GetEnvironmentVariable("TARGET_USER_ID") ?? "mnupea";
         var outputDir = Environment.GetEnvironmentVariable("MUSIC_OUTPUT_PATH") ?? "music";
         var downloadTracks = (Environment.GetEnvironmentVariable("DOWNLOAD_TRACKS") ?? "1") != "0";
-        var targetPlaylist = Environment.GetEnvironmentVariable("TARGET_PLAYLIST");
+        int? targetPlaylistCount = int.TryParse(Environment.GetEnvironmentVariable("TARGET_PLAYLIST_COUNT"), out var parsedCount) && parsedCount > 0
+            ? parsedCount
+            : null;
 
         _logger.LogInformation(
-            "Running sync job for user {UserId} (downloads: {DownloadTracks}, targetPlaylist: {TargetPlaylist})",
+            "Running sync job for user {UserId} (downloads: {DownloadTracks}, targetPlaylistCount: {TargetPlaylistCount})",
             userId,
             downloadTracks,
-            targetPlaylist ?? "<all>");
+            targetPlaylistCount?.ToString() ?? "<all>");
 
-        var result = await _pipeline.RunAsync(userId, outputDir, downloadTracks, targetPlaylist, context.CancellationToken);
+        var result = await _pipeline.RunAsync(userId, outputDir, downloadTracks, targetPlaylistCount, context.CancellationToken);
 
         _logger.LogInformation(
             "Sync finished. Playlists={Playlists}, ScrapedTracks={ScrapedTracks}, Pending={Pending}, Downloaded={Downloaded}, Failed={Failed}",

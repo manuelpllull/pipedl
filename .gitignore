@@ -52,12 +52,15 @@ PublishProfiles/
 *.db-wal
 pipedl.db
 pipedl.db
+data/
 
 # Playwright browser cache (downloaded at runtime)
 .playwright/
 
 # SpotDL downloads — don't commit music
 /music/
+/music_test/
+src/Pipedl.Worker/music/
 
 # ──────────────────────────────────────────────
 # Configuration secrets
