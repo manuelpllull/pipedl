@@ -6,68 +6,19 @@ using Pipedl.Worker;
 
 async Task<int> MainAsync(string[] args)
 {
-    var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
-    if (string.IsNullOrWhiteSpace(connectionString))
-    {
-        var dbPath = Environment.GetEnvironmentVariable("DB_PATH") ?? "pipedl.db";
-        connectionString = $"Data Source={dbPath};";
-    }
-
-    var dbFactory = new DbConnectionFactory(connectionString);
-
-    // If RUN_ONCE environment variable is set, run a full two-step scrape: user → playlists → tracks
-    var runOnce = Environment.GetEnvironmentVariable("RUN_ONCE");
-    if (!string.IsNullOrEmpty(runOnce) && runOnce != "0")
-    {
-        // Accept userId from: CLI arg → TARGET_USER_ID env var → default
-        var input = args.Length > 0
-            ? args[0]
-            : (Environment.GetEnvironmentVariable("TARGET_USER_ID") ?? "mnupea");
-        var userId = input.StartsWith("http")
-            ? System.Text.RegularExpressions.Regex.Match(input, @"/user/([^/]+)").Groups[1].Value
-            : input;
-
-        if (string.IsNullOrEmpty(userId))
+    using IHost host = Host.CreateDefaultBuilder(args)
+        .ConfigureServices((_, services) =>
         {
-            Console.WriteLine("Could not determine userId from input.");
-            return 1;
-        }
+            services.AddSingleton<RuntimeSettings>();
+            services.AddSingleton<DbConnectionFactory>(sp =>
+            {
+                var runtimeSettings = sp.GetRequiredService<RuntimeSettings>();
+                return new DbConnectionFactory(runtimeSettings.ResolveConnectionString());
+            });
 
-        var scraper = new PlaylistScraper();
-        var pipeline = new SyncPipeline(dbFactory, scraper);
-        var outputDir = Environment.GetEnvironmentVariable("MUSIC_OUTPUT_PATH") ?? "music";
-        var downloadTracks = (Environment.GetEnvironmentVariable("DOWNLOAD_TRACKS") ?? "1") != "0";
-        int? targetPlaylistCount = int.TryParse(Environment.GetEnvironmentVariable("TARGET_PLAYLIST_COUNT"), out var parsedCount) && parsedCount > 0
-            ? parsedCount
-            : null;
-
-        try
-        {
-            var result = await pipeline.RunAsync(userId, outputDir, downloadTracks, targetPlaylistCount);
-
-            Console.WriteLine($"\n>>> Done. {result.ScrapedTracks} total scraped track(s) across {result.Playlists} playlist(s).");
-            Console.WriteLine($">>> Pending before download: {result.PendingBeforeDownload}");
-            if (downloadTracks)
-                Console.WriteLine($">>> Downloads complete. Success={result.Downloaded}, Failed={result.FailedDownloads}, Output={result.OutputDirectory}");
-            else
-                Console.WriteLine($">>> DOWNLOAD_TRACKS=0, skipped {result.SkippedDownloads} pending track(s).");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error while scraping: {ex}");
-            return 2;
-        }
-
-        return 0;
-    }
-
-    IHost host = Host.CreateDefaultBuilder(args)
-        .ConfigureServices((hostContext, services) =>
-        {
-            services.AddSingleton(dbFactory);
             services.AddSingleton<PlaylistScraper>();
             services.AddSingleton<SyncPipeline>();
-            
+
             services.AddQuartz(q =>
             {
                 var jobKey = new JobKey("SyncJob");
@@ -83,7 +34,42 @@ async Task<int> MainAsync(string[] args)
         })
         .Build();
 
-    await host.RunAsync();
+    var runtime = host.Services.GetRequiredService<RuntimeSettings>();
+    if (!runtime.IsRunOnceEnabled())
+    {
+        await host.RunAsync();
+        return 0;
+    }
+
+    var syncSettings = runtime.ResolveSyncSettings(args);
+    if (string.IsNullOrWhiteSpace(syncSettings.UserId))
+    {
+        Console.WriteLine("Could not determine userId from input.");
+        return 1;
+    }
+
+    var pipeline = host.Services.GetRequiredService<SyncPipeline>();
+    try
+    {
+        var result = await pipeline.RunAsync(
+            syncSettings.UserId,
+            syncSettings.OutputDir,
+            syncSettings.DownloadTracks,
+            syncSettings.TargetPlaylistCount);
+
+        Console.WriteLine($"\n>>> Done. {result.ScrapedTracks} total scraped track(s) across {result.Playlists} playlist(s).");
+        Console.WriteLine($">>> Pending before download: {result.PendingBeforeDownload}");
+        if (syncSettings.DownloadTracks)
+            Console.WriteLine($">>> Downloads complete. Success={result.Downloaded}, Failed={result.FailedDownloads}, Output={result.OutputDirectory}");
+        else
+            Console.WriteLine($">>> DOWNLOAD_TRACKS=0, skipped {result.SkippedDownloads} pending track(s).");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error while scraping: {ex}");
+        return 2;
+    }
+
     return 0;
 }
 
