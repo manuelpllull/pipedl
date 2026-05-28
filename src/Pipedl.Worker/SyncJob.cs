@@ -6,17 +6,17 @@ namespace Pipedl.Worker;
 public class SyncJob : IJob
 {
     private readonly ILogger<SyncJob> _logger;
-    private readonly SyncPipeline _pipeline;
+    private readonly ISyncJobQueue _queue;
     private readonly RuntimeSettings _runtimeSettings;
 
-    public SyncJob(ILogger<SyncJob> logger, SyncPipeline pipeline, RuntimeSettings runtimeSettings)
+    public SyncJob(ILogger<SyncJob> logger, ISyncJobQueue queue, RuntimeSettings runtimeSettings)
     {
         _logger = logger;
-        _pipeline = pipeline;
+        _queue = queue;
         _runtimeSettings = runtimeSettings;
     }
 
-    public async Task Execute(IJobExecutionContext context)
+    public Task Execute(IJobExecutionContext context)
     {
         var settings = _runtimeSettings.ResolveSyncSettings();
 
@@ -26,19 +26,9 @@ public class SyncJob : IJob
             settings.DownloadTracks,
             settings.TargetPlaylistCount?.ToString() ?? "<all>");
 
-        var result = await _pipeline.RunAsync(
-            settings.UserId,
-            settings.OutputDir,
-            settings.DownloadTracks,
-            settings.TargetPlaylistCount,
-            context.CancellationToken);
+        var accepted = _queue.Enqueue(settings, "scheduler");
+        _logger.LogInformation("Scheduled sync was queued with JobId={JobId}", accepted.JobId);
 
-        _logger.LogInformation(
-            "Sync finished. Playlists={Playlists}, ScrapedTracks={ScrapedTracks}, Pending={Pending}, Downloaded={Downloaded}, Failed={Failed}",
-            result.Playlists,
-            result.ScrapedTracks,
-            result.PendingBeforeDownload,
-            result.Downloaded,
-            result.FailedDownloads);
+        return Task.CompletedTask;
     }
 }
