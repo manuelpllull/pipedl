@@ -13,7 +13,7 @@
 | **Infinite scroll support** | Handles Spotify's lazy-loaded playlist pages automatically |
 | **Hash-diff engine** | SHA-1 checksum + `HashSet` diff keeps DB in sync: only inserts new tracks, archives removed ones |
 | **SQLite + Dapper** | Lightweight persistence with WAL mode — safe for concurrent read/write on the Pi |
-| **SpotDL integration** | Invokes `spotdl` as a subprocess; outputs to `/music/navidrome/{playlist}/{title}.{ext}` |
+| **SpotDL integration** | Invokes `spotdl` as a subprocess and stores track metadata (`title`, `artist`, `album`, `duration`) in SQLite |
 | **Navidrome scan trigger** | Optionally calls Navidrome's REST API to refresh the library after a download batch |
 | **Quartz.NET scheduler** | Cron expression in `appsettings.json` — no separate task runner needed |
 | **Semaphore concurrency** | Configurable parallelism (`MaxConcurrentPlaylists`) keeps CPU/RAM usage Pi-friendly |
@@ -94,9 +94,29 @@ npx playwright@1.59.0 install chromium
 ```bash
 # Prints all playlists and their tracks for a given Spotify user ID
 env PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright \
+  ConnectionStrings__Default="Data Source=$PWD/data/pipedl.db" \
   RUN_ONCE=1 \
   ~/.dotnet/dotnet bin/Release/net10.0/Pipedl.Worker.dll mnupea
 ```
+
+### 4.1 Run with downloads (example: first 2 playlists)
+
+```bash
+env PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright \
+  ConnectionStrings__Default="Data Source=$PWD/data/pipedl.db" \
+  RUN_ONCE=1 \
+  TARGET_PLAYLIST_COUNT=2 \
+  DOWNLOAD_TRACKS=1 \
+  MUSIC_OUTPUT_PATH="$PWD/music_test" \
+  ~/.dotnet/dotnet run --no-launch-profile --project src/Pipedl.Worker/Pipedl.Worker.csproj -- mnupea
+```
+
+`Program.cs` resolves the database in this order:
+1. `ConnectionStrings__Default`
+2. `DB_PATH` (converted to `Data Source=...`)
+3. fallback `pipedl.db`
+
+When using relative SQLite paths, they are resolved from the app base directory (the compiled output folder), not the repository root.
 
 ### 5. Run as a scheduled service
 
@@ -160,6 +180,7 @@ All settings are passed as environment variables in `docker-compose.yml`:
 | `TARGET_USER_ID` | `mnupea` | Spotify user ID to sync |
 | `CRON_EXPRESSION` | `0 0 0 * * ?` | Quartz cron (midnight daily) |
 | `DB_PATH` | `/data/pipedl.db` | SQLite file path inside the container |
+| `ConnectionStrings__Default` | *(unset)* | Full SQLite connection string; overrides `DB_PATH` when set |
 | `MUSIC_OUTPUT_PATH` | `/music` | SpotDL download root inside the container |
 | `RUN_ONCE` | *(unset)* | Set to `1` to scrape once and exit |
 | `NAVIDROME_URL` | *(unset)* | Optional: trigger library scan after download |
@@ -278,15 +299,21 @@ DB (existing)    Scraped (new)
 New tracks in DB
       │
       ▼
-DownloadHandler
+SyncPipeline
       │
       ├─ spotdl https://open.spotify.com/track/{id}
-      │         --output "/music/navidrome/{playlist}/{title}.{ext}"
+  │         download ... --output "{MusicOutputPath}"
+  │
+  ├─ spotdl save https://open.spotify.com/track/{id} --save-file -
+  │         (metadata enrichment)
       │
       └─ On exit code 0:
-            Mark track Downloaded = 1 in DB
+    Mark track Downloaded = 1 in DB
+    Update title/artist/album/duration from SpotDL metadata
             Trigger Navidrome library scan (optional)
 ```
+
+If a track was downloaded before metadata enrichment existed, the worker backfills missing metadata for active downloaded tracks via `spotdl save` (without re-downloading files).
 
 ---
 
