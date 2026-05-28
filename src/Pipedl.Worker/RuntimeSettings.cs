@@ -6,7 +6,8 @@ public sealed record SyncExecutionSettings(
     string UserId,
     string OutputDir,
     bool DownloadTracks,
-    int? TargetPlaylistCount);
+    int? TargetPlaylistCount,
+    bool SkipScrape);
 
 public sealed class RuntimeSettings
 {
@@ -41,11 +42,12 @@ public sealed class RuntimeSettings
 
         var outputDir = Environment.GetEnvironmentVariable("MUSIC_OUTPUT_PATH") ?? DefaultOutputDir;
         var downloadTracks = (Environment.GetEnvironmentVariable("DOWNLOAD_TRACKS") ?? "1") != "0";
+        var skipScrape = (Environment.GetEnvironmentVariable("SKIP_SCRAPE") ?? "0") != "0";
 
         int? targetPlaylistCount = int.TryParse(Environment.GetEnvironmentVariable("TARGET_PLAYLIST_COUNT"), out var parsedCount) && parsedCount > 0
             ? parsedCount
             : null;
 
-        return new SyncExecutionSettings(userId, outputDir, downloadTracks, targetPlaylistCount);
+        return new SyncExecutionSettings(userId, outputDir, downloadTracks, targetPlaylistCount, skipScrape);
     }
 }

@@ -81,7 +81,8 @@ async Task<int> MainAsync(string[] args)
                 UserId = string.IsNullOrWhiteSpace(request?.UserId) ? defaults.UserId : request!.UserId!,
                 OutputDir = string.IsNullOrWhiteSpace(request?.OutputDir) ? defaults.OutputDir : request!.OutputDir!,
                 DownloadTracks = request?.DownloadTracks ?? defaults.DownloadTracks,
-                TargetPlaylistCount = request?.TargetPlaylistCount ?? defaults.TargetPlaylistCount
+                TargetPlaylistCount = request?.TargetPlaylistCount ?? defaults.TargetPlaylistCount,
+                SkipScrape = request?.SkipScrape ?? defaults.SkipScrape
             };
 
             if (string.IsNullOrWhiteSpace(effective.UserId))

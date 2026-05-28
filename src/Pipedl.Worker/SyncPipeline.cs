@@ -22,6 +22,7 @@ public class SyncPipeline
         string outputDir,
         bool downloadTracks,
         int? targetPlaylistCount = null,
+        bool skipScrape = false,
         CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(outputDir);
@@ -30,44 +31,54 @@ public class SyncPipeline
         connection.Open();
         EnsureSchema(connection);
 
-        var playlists = (await _scraper.GetPlaylistsForUserAsync(userId)).ToList();
-
-        if (targetPlaylistCount.HasValue && targetPlaylistCount.Value > 0)
-        {
-            playlists = playlists.Take(targetPlaylistCount.Value).ToList();
-            Console.WriteLine($">>> TARGET_PLAYLIST_COUNT set. Taking first {playlists.Count} playlist(s).");
-        }
-
-        Console.WriteLine($"\n>>> Found {playlists.Count} playlist(s) for user '{userId}'.");
-
-        var playlistUrls = new HashSet<string>(playlists.Select(p => p.Url), StringComparer.OrdinalIgnoreCase);
-        MarkPlaylistsInactiveNotIn(connection, playlistUrls);
-
+        var playlistCount = 0;
         var totalScrapedTracks = 0;
 
-        foreach (var playlist in playlists)
+        if (skipScrape)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            playlistCount = GetActivePlaylistCount(connection);
+            Console.WriteLine($"\n>>> SKIP_SCRAPE=1. Reusing {playlistCount} active playlist(s) from the database.");
+        }
+        else
+        {
+            var playlists = (await _scraper.GetPlaylistsForUserAsync(userId)).ToList();
 
-            var playlistId = ExtractPlaylistId(playlist.Url);
-            if (string.IsNullOrWhiteSpace(playlistId))
+            if (targetPlaylistCount.HasValue && targetPlaylistCount.Value > 0)
             {
-                Console.WriteLine($"[db] Skipping playlist with invalid URL: {playlist.Url}");
-                continue;
+                playlists = playlists.Take(targetPlaylistCount.Value).ToList();
+                Console.WriteLine($">>> TARGET_PLAYLIST_COUNT set. Taking first {playlists.Count} playlist(s).");
             }
 
-            var tracks = (await _scraper.GetTracksForPlaylistAsync(playlist)).ToList();
-            totalScrapedTracks += tracks.Count;
+            playlistCount = playlists.Count;
+            Console.WriteLine($"\n>>> Found {playlistCount} playlist(s) for user '{userId}'.");
 
-            var trackIds = tracks
-                .Select(t => ExtractTrackId(t.Url))
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Select(id => id!)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            var playlistUrls = new HashSet<string>(playlists.Select(p => p.Url), StringComparer.OrdinalIgnoreCase);
+            MarkPlaylistsInactiveNotIn(connection, playlistUrls);
 
-            UpsertPlaylist(connection, playlistId, playlist.Name, userId, trackIds);
-            ReplacePlaylistTracks(connection, playlistId, trackIds);
+            foreach (var playlist in playlists)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var playlistId = ExtractPlaylistId(playlist.Url);
+                if (string.IsNullOrWhiteSpace(playlistId))
+                {
+                    Console.WriteLine($"[db] Skipping playlist with invalid URL: {playlist.Url}");
+                    continue;
+                }
+
+                var tracks = (await _scraper.GetTracksForPlaylistAsync(playlist)).ToList();
+                totalScrapedTracks += tracks.Count;
+
+                var trackIds = tracks
+                    .Select(t => ExtractTrackId(t.Url))
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id!)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                UpsertPlaylist(connection, playlistId, playlist.Name, userId, trackIds);
+                ReplacePlaylistTracks(connection, playlistId, trackIds);
+            }
         }
 
         var pendingTrackIds = GetPendingTrackIds(connection);
@@ -121,7 +132,7 @@ public class SyncPipeline
 
         return new SyncRunResult
         {
-            Playlists = playlists.Count,
+            Playlists = playlistCount,
             ScrapedTracks = totalScrapedTracks,
             PendingBeforeDownload = pendingTrackIds.Count,
             Downloaded = downloaded,
@@ -334,6 +345,13 @@ ORDER BY t.spotify_id;
         }
 
         return ids;
+    }
+
+    private static int GetActivePlaylistCount(IDbConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM playlists WHERE is_active = 1;";
+        return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     private static void MarkTrackDownloaded(IDbConnection connection, string trackId, SpotdlTrackMetadata? metadata)

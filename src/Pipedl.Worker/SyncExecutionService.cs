@@ -28,16 +28,18 @@ public sealed class SyncExecutionService : ISyncExecutionService
         try
         {
             _logger.LogInformation(
-                "Starting sync execution for user {UserId} (downloads: {DownloadTracks}, targetPlaylistCount: {TargetPlaylistCount})",
+                "Starting sync execution for user {UserId} (downloads: {DownloadTracks}, targetPlaylistCount: {TargetPlaylistCount}, skipScrape: {SkipScrape})",
                 settings.UserId,
                 settings.DownloadTracks,
-                settings.TargetPlaylistCount?.ToString() ?? "<all>");
+                settings.TargetPlaylistCount?.ToString() ?? "<all>",
+                settings.SkipScrape);
 
             return await _pipeline.RunAsync(
                 settings.UserId,
                 settings.OutputDir,
                 settings.DownloadTracks,
                 settings.TargetPlaylistCount,
+                settings.SkipScrape,
                 cancellationToken);
         }
         finally
@@ -51,4 +53,5 @@ public sealed record ForceSyncRequest(
     string? UserId,
     string? OutputDir,
     bool? DownloadTracks,
-    int? TargetPlaylistCount);
+    int? TargetPlaylistCount,
+    bool? SkipScrape);
